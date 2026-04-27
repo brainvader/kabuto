@@ -140,6 +140,40 @@
       }
     </script>
 
+        <!-- ============================================================
+     TECH STACK
+     AIはこの定義をもとに、使用ライブラリ・制約・選定理由を参照する。
+============================================================ -->
+        <script id="tech-stack" type="application/json">
+  {
+    "framework": "React 19 + TypeScript + Vite + Tauri 2",
+    "ui": {
+      "component_library": "shadcn/ui",
+      "styling": "Tailwind CSS v4",
+      "icons": "lucide-react",
+      "graph": "@xyflow/react"
+    },
+    "state": {
+      "global": "Zustand",
+      "validation": "Zod"
+    },
+    "data": {
+      "graph_db": "FalkorDB",
+      "compute": "Polars (via Tauri Rust bridge)",
+      "format": "Parquet / JSON"
+    },
+    "ai": {
+      "model": "Gemini",
+      "mode": "function_calling",
+      "temperature": 0
+    },
+    "test": {
+      "unit": "Vitest + React Testing Library",
+      "e2e": "Playwright"
+    }
+  }
+</script>
+
         <style>
             :root {
                 --bg: #0b0f19;
