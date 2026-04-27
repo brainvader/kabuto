@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="ja">
+    <head>
+        <meta charset="UTF-8" />
+        <title>ContextMap: Kabuto - Palantir AIP Style Design Doc</title>
+
+        <!--
+      GLOBAL STORE 設計方針:
+      - FalkorDB = 事実（JPXデータ・銘柄属性）。シミュレーションで変更しない。
+      - シミュレーション結果 = 別空間（レポートファイル）で管理。Write back なし。
+      - actionRegistry は Gemini の単発 tools 定義と同一。
+      - pipelineRegistry は GUI で構築・登録した承認済み分析フローの定義。
+      - Gemini は actionRegistry と pipelineRegistry の両方を tools として参照する。
+      - execution.mode が ctx-graph のモード切替を制御する。
+        GRAPH    → 通常の因果グラフ
+        COT      → Geminiの実行計画フロー(Chain of Thought)をグラフ化
+        PIPELINE → パイプライン構築GUI（React Flowキャンバスを再利用）
+      - operationPolicy で操作の危険度を分類する。
+        read              → 承認不要
+        simulation        → CoT表示 + 承認
+        fact_write        → 確認ダイアログ必須
+      - FalkorDB のバージョン管理（事実の変更）は将来課題。
+        方針: Cypher スナップショットを Git 管理する想定。
+    -->
+        <script id="global-store" type="application/json">
+      {
+        "project": "Kabuto",
+        "infrastructure": {
+          "db": "FalkorDB",
+          "compute": "Polars-rs",
+          "db_policy": "read_only_from_simulation"
+        },
+        "agent": {
+          "model": "Gemini",
+          "mode": "function_calling",
+          "temperature": 0
+        },
+        "selection": { "id": "1605", "type": "Company", "name": "INPEX" },
+        "execution": {
+          "status": "idle",
+          "mode": "GRAPH"
+        },
+        "operationPolicy": {
+          "read": "auto",
+          "simulation": "requires_approval",
+          "fact_write": "requires_confirmation"
+        },
+        "simulation": {
+          "output": "reports/",
+          "format": "json",
+          "note": "シミュレーション結果はレポートファイルとして出力。FalkorDBには書き戻さない。"
+        },
+        "actionRegistry": {
+          "stress_test": {
+            "when": "外部ショックが特定企業に与える影響を見たい時",
+            "input": ["selection_id", "variable", "delta"],
+            "output": ["impact_score", "affected_nodes"],
+            "executor": "execute_script",
+            "script": "scripts/stress_test.py",
+            "writes_to": "simulation",
+            "policy": "simulation"
+          },
+          "valuation_dcf": {
+            "when": "企業の理論株価を算出したい時",
+            "input": ["selection_id", "discount_rate", "forecast_years"],
+            "output": ["fair_value", "upside_pct"],
+            "executor": "execute_script",
+            "script": "scripts/valuation_dcf.py",
+            "writes_to": "simulation",
+            "policy": "simulation"
+          },
+          "risk_scan": {
+            "when": "ポートフォリオ全体のリスク分布を把握したい時",
+            "input": ["selection_ids", "risk_factors"],
+            "output": ["risk_matrix", "top_exposures"],
+            "executor": "execute_script",
+            "script": "scripts/risk_scan.py",
+            "writes_to": "simulation",
+            "policy": "simulation"
+          },
+          "run_pipeline": {
+            "when": "登録済みの分析パイプラインを実行したい時",
+            "input": ["pipeline_id", "selection_id"],
+            "output": ["report_path"],
+            "executor": "pipeline_runner",
+            "writes_to": "simulation",
+            "policy": "simulation"
+          }
+        },
+        "pipelineRegistry": {
+          "oil_sensitivity": {
+            "label": "原油感応度分析",
+            "description": "原油価格の上下変動が対象企業に与える影響を分析する",
+            "steps": [
+              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": 0.1 } },
+              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": -0.1 } }
+            ],
+            "input": ["selection_id"],
+            "output": "reports/pipeline/"
+          }
+        },
+        "uiDataFlows": [
+          {
+            "from": "ctx-graph",
+            "to": "global-store",
+            "data": "selection.id",
+            "trigger": "node_click"
+          },
+          {
+            "from": "global-store",
+            "to": "ctx-aip",
+            "data": "selection",
+            "trigger": "selection_change"
+          },
+          {
+            "from": "global-store",
+            "to": "ctx-metrics",
+            "data": "selection",
+            "trigger": "selection_change"
+          },
+          {
+            "from": "ctx-aip",
+            "to": "ctx-graph",
+            "data": "execution.mode",
+            "trigger": "cot_generated"
+          },
+          {
+            "from": "ctx-graph",
+            "to": "pipelineRegistry",
+            "data": "pipeline_definition",
+            "trigger": "pipeline_saved"
+          },
+          {
+            "from": "ctx-aip",
+            "to": "ctx-metrics",
+            "data": "simulation_report_path",
+            "trigger": "action_executed"
+          }
+        ]
+      }
+    </script>
+
+        <style>
+            :root {
+                --bg: #0b0f19;
+                --panel: #111827;
+                --border: #1f2937;
+                --accent: #3b82f6;
+                --action: #10b981;
+                --warning: #f59e0b;
+                --danger: #ef4444;
+                --text: #f3f4f6;
+                --text-dim: #9ca3af;
+            }
+
+            body {
+                margin: 0;
+                background: var(--bg);
+                color: var(--text);
+                font-family: 'Segoe UI', system-ui, sans-serif;
+                display: grid;
+                grid-template-columns: 320px 1fr 420px;
+                grid-template-rows: 60px 1fr 260px;
+                height: 100vh;
+                overflow: hidden;
+            }
+
+            header {
+                grid-column: 1 / -1;
+                background: var(--panel);
+                border-bottom: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                padding: 0 20px;
+                justify-content: space-between;
+                z-index: 100;
+            }
+
+            .context-area {
+                background: var(--panel);
+                border: 1px solid var(--border);
+                margin: 4px;
+                border-radius: 4px;
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                position: relative;
+            }
+
+            .area-header {
+                position: sticky;
+                top: 0;
+                z-index: 30;
+                padding: 12px 15px;
+                background: #1f2937;
+                font-size: 0.7rem;
+                font-weight: 900;
+                text-transform: uppercase;
+                color: var(--text-dim);
+                border-bottom: 1px solid var(--border);
+            }
+
+            .scroll-container {
+                flex: 1;
+                overflow-y: auto;
+                padding: 15px;
+            }
+
+            .features {
+                margin: 0;
+                padding: 0;
+                list-style: none;
+            }
+
+            .features li {
+                margin-bottom: 24px;
+                padding: 16px;
+                background: #1e293b50;
+                border-left: 4px solid var(--accent);
+            }
+
+            .features b {
+                display: block;
+                color: var(--accent);
+                font-family: monospace;
+                margin-bottom: 8px;
+                font-size: 0.95rem;
+            }
+
+            .features p {
+                margin: 0;
+                font-size: 0.9rem;
+                line-height: 1.6;
+                color: var(--text);
+            }
+
+            .cot-box {
+                background: #0f172a;
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                padding: 12px;
+                margin-top: 10px;
+                font-size: 0.85rem;
+            }
+
+            .cot-thought {
+                color: var(--text-dim);
+                font-style: italic;
+                margin-bottom: 10px;
+                border-bottom: 1px dotted var(--border);
+                padding-bottom: 8px;
+                line-height: 1.6;
+            }
+
+            .plan-card {
+                border: 1px solid var(--warning);
+                padding: 10px;
+                background: #fbbf2410;
+                margin-bottom: 10px;
+            }
+
+            .report-preview {
+                background: #000;
+                padding: 8px;
+                font-family: monospace;
+                font-size: 0.75rem;
+                margin-top: 8px;
+                color: var(--action);
+                line-height: 1.6;
+            }
+
+            .btn-group {
+                display: grid;
+                grid-template-columns: 1fr 2fr;
+                gap: 8px;
+                margin-top: 12px;
+            }
+
+            .btn {
+                padding: 12px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 0.85rem;
+            }
+
+            .btn-cancel {
+                background: #374151;
+                color: white;
+            }
+
+            .btn-approve {
+                background: var(--action);
+                color: #000;
+            }
+        </style>
+    </head>
+    <body>
+
+        <header>
+            <div style="letter-spacing: 2px; font-weight: bold;">KABUTO // ONTOLOGY</div>
+            <div style="font-family: monospace; color: var(--action); font-size: 0.8rem;">
+                ● DB_POLICY: READ_ONLY_FROM_SIMULATION
+            </div>
+        </header>
+
+        <!-- ============================================================
+         CTX-1: ONTOLOGY EXPLORER
+         責務: FalkorDB へのデータ投入・スキーマ定義（事実の管理）
+         DB アクセス: Write（手動トリガーのみ・fact_write承認必須）
+         注意: シミュレーション・パイプラインからは Write しない
+    ============================================================ -->
+        <nav id="ctx-ontology" class="context-area">
+            <div class="area-header">1. Ontology Explorer</div>
+            <div class="scroll-container">
+                <ul class="features">
+                    <li>
+                        <b>[Feature] JPX Data Ingestion</b>
+                        <p>JPX公式サイトから最新の銘柄一覧CSVを取得。FalkorDB上で一意性を担保しつつ、全上場企業をノードとしてMERGEする。operationPolicy: fact_write
+                            のため確認ダイアログ必須。</p>
+                    </li>
+                    <li>
+                        <b>[Feature] Object Mapping</b>
+                        <p>各銘柄ノードに対し、ローカルのWindowsパス上のParquet（株価履歴）およびXBRL（財務報告書）の絶対パスをURIプロパティとして紐付ける。</p>
+                    </li>
+                    <li>
+                        <b>[Feature] Metadata Schema</b>
+                        <p>33業種区分・市場区分・時価総額ランクなどの属性をオントロジープロパティとして定義。Geminiが引数を選ぶ際の制約（選択肢）となる。</p>
+                    </li>
+                    <li>
+                        <b>[Logic] Manual Ingest Trigger</b>
+                        <p>ユーザーによる手動更新ボタン押下時のみ実行。差分データのみを効率的に更新する。</p>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+
+        <!-- ============================================================
+         CTX-2: CAUSAL GRAPH / PIPELINE BUILDER
+         責務: FalkorDB の可視化・selection 更新・実行計画可視化・パイプライン構築
+         DB アクセス: Read only（Cypher Query）
+         モード（execution.mode で切り替え）:
+           GRAPH    → 通常の因果グラフ（FalkorDBから描画）
+           COT      → Geminiの実行計画フロー（CoTグラフ）
+           PIPELINE → パイプライン構築GUI
+                      actionRegistry のノードをドラッグ&ドロップで接続
+                      完成したパイプラインを pipelineRegistry に登録
+         データフロー:
+           node_click    → global-store.selection を更新
+           cot_generated → ctx-aip から COT モードへの切替を受信
+           pipeline_saved → 構築したパイプラインを pipelineRegistry へ保存
+    ============================================================ -->
+        <main id="ctx-graph" class="context-area">
+            <div class="area-header">2. Causal Graph / Pipeline Builder (React Flow Canvas)</div>
+            <div class="scroll-container">
+                <ul class="features">
+                    <li>
+                        <b>[Feature] Dynamic Graph Rendering (GRAPHモード)</b>
+                        <p>FalkorDBへのCypherクエリ結果（Nodes/Edges）をReact FlowのJSON形式に動的変換し描画する。ノードクリックでselection.idを更新する。</p>
+                    </li>
+                    <li>
+                        <b>[Feature] Edge Weighted Visualization (GRAPHモード)</b>
+                        <p>因果関係の強さや相関係数に基づき、エッジの太さ・透過度を動的に変更し影響力を視覚化する。</p>
+                    </li>
+                    <li>
+                        <b>[Logic] Semantic Zoom & Detail (GRAPHモード)</b>
+                        <p>ズームレベルに応じて表示情報を切り替え。縮小時は名称のみ、拡大時はPolarsで計算したリアルタイム数値を表示する。</p>
+                    </li>
+                    <li>
+                        <b>[Logic] Graph Layout Strategy (GRAPHモード)</b>
+                        <p>D3-forceやDagreを活用し、数千ノードを重なりなく自動配置する。</p>
+                    </li>
+                    <li>
+                        <b>[Logic] CoT Flow Rendering (COTモード)</b>
+                        <p>ctx-aipからexecution.mode: COTを受け取ったとき、Geminiの実行計画をReact
+                            Flowのノード・エッジとしてキャンバスに描画する。因果グラフとは切り替えて表示する。</p>
+                    </li>
+                    <li>
+                        <b>[Feature] Pipeline Builder (PIPELINEモード)</b>
+                        <p>actionRegistryの各actionをノードとしてパレットに表示。ドラッグ&ドロップでキャンバスに配置し、エッジで繋ぐことで分析フローを構築する。入力パラメータ（selection_id等）はノード上で設定する。完成したパイプラインに名前・説明を付けてpipelineRegistryに登録する。
+                        </p>
+                    </li>
+                    <li>
+                        <b>[Logic] Graph Mode Switching</b>
+                        <p>execution.modeに応じてキャンバスの内容を切り替える。GRAPH / COT / PIPELINEの3モードをヘッダーのタブで切り替え可能。</p>
+                    </li>
+                </ul>
+            </div>
+        </main>
+
+        <!-- ============================================================
+         CTX-3: AIP LOGIC / CoT DEBUGGER
+         責務: Gemini Function Calling・CoT表示・実行・レポート出力
+         DB アクセス: なし（シミュレーション結果はレポートファイルへ）
+         Gemini が参照する tools:
+           - actionRegistry（単発アクション）
+           - pipelineRegistry（登録済みパイプライン） ← run_pipeline経由
+         データフロー:
+           1. global-store.selection を受け取り Gemini へ送信
+           2. Gemini の CoT(text) + functionCall を表示
+           3. ctx-graph に COT モードへの切替を指示
+           4. 承認後に Tauri Bridge 経由で execute_script を呼び出す
+           5. 結果を reports/ にファイル出力
+           6. レポートパスを ctx-metrics へ送信
+         実装方針:
+           - execute_script(script, args: JSON) でリビルド不要
+           - 引数は FalkorDB のオントロジーから制約（推測しない）
+           - FalkorDB への Write back は一切しない
+           - operationPolicy に従い承認レベルを自動判定
+    ============================================================ -->
+        <aside id="ctx-aip" class="context-area">
+            <div class="area-header">3. AIP Logic / CoT Debugger</div>
+            <div class="scroll-container">
+                <ul class="features">
+                    <li>
+                        <b>[Feature] Gemini Function Calling</b>
+                        <p>selectionの型・actionRegistryの"when"・pipelineRegistryのlabelを元に、Geminiが最適な関数またはパイプラインを選択する。引数はFalkorDBのオントロジーから取得し推測に頼らない。temperature=0で決定論的に動作させる。
+                        </p>
+                    </li>
+                    <li>
+                        <b>[Feature] CoT Visualization → Graph Mode</b>
+                        <p>Geminiのtext（思考過程）とfunctionCall（実行計画）を分離して表示。同時にctx-graphをCOTモードに切り替え、実行計画をReact
+                            Flowグラフとして可視化する。</p>
+                    </li>
+                    <li>
+                        <b>[Feature] Approval Gate（承認ゲート）</b>
+                        <p>operationPolicyに従い承認レベルを自動判定。simulation: CoT表示後に承認ボタン。fact_write:
+                            確認ダイアログ。承認後にexecute_scriptを呼び出す。FalkorDBへの変更は一切しない。</p>
+                    </li>
+                    <li>
+                        <b>[Logic] execute_script Bridge</b>
+                        <p>Tauri側はexecute_script(script: String, args:
+                            JSON)のみを持つ汎用コマンド。新しいアクションの追加はスクリプトファイルを置くだけでリビルド不要。パイプラインはstepsを順次実行する。</p>
+                    </li>
+                    <li>
+                        <b>[Feature] Simulation Report Output</b>
+                        <p>実行結果をreports/ディレクトリにJSONファイルとして出力。パイプライン実行時はreports/pipeline/に保存。FalkorDB（事実）とシミュレーション（仮説）を明確に分離する。
+                        </p>
+                    </li>
+                    <li>
+                        <b>[Feature] Narrative Generation</b>
+                        <p>実行結果をGeminiが自然言語で要約。因果関係のパスを辿り「なぜこの数値になったか」のストーリーを生成する。</p>
+                    </li>
+                </ul>
+
+                <!-- CoT Debugger UI のモックアップ（パイプライン実行時） -->
+                <div class="cot-box">
+                    <div
+                        style="font-size:0.7rem; font-weight:900; color:var(--text-dim); margin-bottom:10px; text-transform:uppercase;">
+                        Gemini Chain of Thought
+                    </div>
+                    <div class="cot-thought">
+                        "INPEX(1605)の原油感応度を分析します。登録済みパイプライン「oil_sensitivity」が適切です。stress_test(+10%)とstress_test(-10%)を順次実行し、結果をレポートとして出力します。"
+                    </div>
+
+                    <div class="plan-card">
+                        <div style="font-size:0.7rem; font-weight:bold; color:var(--warning);">
+                            PROPOSED PIPELINE EXECUTION
+                        </div>
+                        <div style="font-family:monospace; font-size:0.8rem; margin-top:5px; line-height:1.8;">
+                            pipeline: oil_sensitivity<br>
+                            input: { "selection_id": "1605" }<br>
+                            steps:<br>
+                            &nbsp;&nbsp;1. stress_test(crude_oil, +10%)<br>
+                            &nbsp;&nbsp;2. stress_test(crude_oil, -10%)
+                        </div>
+                        <div class="report-preview">
+                            # SIMULATION OUTPUT (FalkorDB は変更しない)<br>
+                            → reports/pipeline/oil_sensitivity_1605_20240426.json
+                        </div>
+                    </div>
+
+                    <div class="btn-group">
+                        <button class="btn btn-cancel">キャンセル</button>
+                        <button class="btn btn-approve">承認して実行</button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ============================================================
+         CTX-4: METRICS ENGINE
+         責務: Polars による計算・チャート描画・レポート読み込み
+         DB アクセス: Read only（Parquet）
+         トリガー:
+           - selection_change: 選択銘柄の時系列データをロード
+           - simulation_report_path: レポートファイルを読み込み
+                                     シミュレーション結果を予測エッジとして合成
+    ============================================================ -->
+        <footer id="ctx-metrics" class="context-area" style="grid-column: 1 / -1;">
+            <div class="area-header">4. Metrics Engine (Polars / Parquet)</div>
+            <div style="display:flex; height: 100%; overflow: hidden;">
+                <div class="scroll-container" style="flex:1; border-right: 1px solid var(--border);">
+                    <ul class="features">
+                        <li>
+                            <b>[Feature] Sub-second Metric Calculation</b>
+                            <p>Polars-rsを活用し、巨大な株価Parquetファイルから特定期間の騰落率や財務KPIをサブ秒で抽出・チャート描画する。</p>
+                        </li>
+                        <li>
+                            <b>[Feature] Cross-Object Correlation</b>
+                            <p>グラフで選択した複数ノードの時系列データを同期ロード。銘柄間・指標間の相関をリアルタイムで算出・表示する。</p>
+                        </li>
+                    </ul>
+                </div>
+                <div class="scroll-container" style="flex:1;">
+                    <ul class="features">
+                        <li>
+                            <b>[Feature] Simulation Report Viewer</b>
+                            <p>ctx-aipが出力したレポートファイル（reports/**/*.json）を読み込み、シミュレーション・パイプライン実行結果を既存の時系列チャートに予測エッジ（別色）として合成表示する。過去レポートの読み込みも可能。
+                            </p>
+                        </li>
+                        <li>
+                            <b>[Logic] Intelligent Caching</b>
+                            <p>一度読み込んだParquetの計算結果をメモリ上に保持。同一セッション内での高速な再描画とUI応答性を保証する。</p>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </footer>
+
+    </body>
+</html>
