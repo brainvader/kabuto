@@ -5,174 +5,174 @@
         <title>ContextMap: Kabuto - Palantir AIP Style Design Doc</title>
 
         <!--
-      GLOBAL STORE 設計方針:
-      - FalkorDB = 事実（JPXデータ・銘柄属性）。シミュレーションで変更しない。
-      - シミュレーション結果 = 別空間（レポートファイル）で管理。Write back なし。
-      - actionRegistry は Gemini の単発 tools 定義と同一。
-      - pipelineRegistry は GUI で構築・登録した承認済み分析フローの定義。
-      - Gemini は actionRegistry と pipelineRegistry の両方を tools として参照する。
-      - execution.mode が ctx-graph のモード切替を制御する。
-        GRAPH    → 通常の因果グラフ
-        COT      → Geminiの実行計画フロー(Chain of Thought)をグラフ化
-        PIPELINE → パイプライン構築GUI（React Flowキャンバスを再利用）
-      - operationPolicy で操作の危険度を分類する。
-        read              → 承認不要
-        simulation        → CoT表示 + 承認
-        fact_write        → 確認ダイアログ必須
-      - FalkorDB のバージョン管理（事実の変更）は将来課題。
-        方針: Cypher スナップショットを Git 管理する想定。
-    -->
+                      GLOBAL STORE 設計方針:
+                      - FalkorDB = 事実（JPXデータ・銘柄属性）。シミュレーションで変更しない。
+                      - シミュレーション結果 = 別空間（レポートファイル）で管理。Write back なし。
+                      - actionRegistry は Gemini の単発 tools 定義と同一。
+                      - pipelineRegistry は GUI で構築・登録した承認済み分析フローの定義。
+                      - Gemini は actionRegistry と pipelineRegistry の両方を tools として参照する。
+                      - execution.mode が ctx-graph のモード切替を制御する。
+                        GRAPH    → 通常の因果グラフ
+                        COT      → Geminiの実行計画フロー(Chain of Thought)をグラフ化
+                        PIPELINE → パイプライン構築GUI（React Flowキャンバスを再利用）
+                      - operationPolicy で操作の危険度を分類する。
+                        read              → 承認不要
+                        simulation        → CoT表示 + 承認
+                        fact_write        → 確認ダイアログ必須
+                      - FalkorDB のバージョン管理（事実の変更）は将来課題。
+                        方針: Cypher スナップショットを Git 管理する想定。
+                    -->
         <script id="global-store" type="application/json">
-      {
-        "project": "Kabuto",
-        "infrastructure": {
-          "db": "FalkorDB",
-          "compute": "Polars-rs",
-          "db_policy": "read_only_from_simulation"
-        },
-        "agent": {
-          "model": "Gemini",
-          "mode": "function_calling",
-          "temperature": 0
-        },
-        "selection": { "id": "1605", "type": "Company", "name": "INPEX" },
-        "execution": {
-          "status": "idle",
-          "mode": "GRAPH"
-        },
-        "operationPolicy": {
-          "read": "auto",
-          "simulation": "requires_approval",
-          "fact_write": "requires_confirmation"
-        },
-        "simulation": {
-          "output": "reports/",
-          "format": "json",
-          "note": "シミュレーション結果はレポートファイルとして出力。FalkorDBには書き戻さない。"
-        },
-        "actionRegistry": {
-          "stress_test": {
-            "when": "外部ショックが特定企業に与える影響を見たい時",
-            "input": ["selection_id", "variable", "delta"],
-            "output": ["impact_score", "affected_nodes"],
-            "executor": "execute_script",
-            "script": "scripts/stress_test.py",
-            "writes_to": "simulation",
-            "policy": "simulation"
-          },
-          "valuation_dcf": {
-            "when": "企業の理論株価を算出したい時",
-            "input": ["selection_id", "discount_rate", "forecast_years"],
-            "output": ["fair_value", "upside_pct"],
-            "executor": "execute_script",
-            "script": "scripts/valuation_dcf.py",
-            "writes_to": "simulation",
-            "policy": "simulation"
-          },
-          "risk_scan": {
-            "when": "ポートフォリオ全体のリスク分布を把握したい時",
-            "input": ["selection_ids", "risk_factors"],
-            "output": ["risk_matrix", "top_exposures"],
-            "executor": "execute_script",
-            "script": "scripts/risk_scan.py",
-            "writes_to": "simulation",
-            "policy": "simulation"
-          },
-          "run_pipeline": {
-            "when": "登録済みの分析パイプラインを実行したい時",
-            "input": ["pipeline_id", "selection_id"],
-            "output": ["report_path"],
-            "executor": "pipeline_runner",
-            "writes_to": "simulation",
-            "policy": "simulation"
-          }
-        },
-        "pipelineRegistry": {
-          "oil_sensitivity": {
-            "label": "原油感応度分析",
-            "description": "原油価格の上下変動が対象企業に与える影響を分析する",
-            "steps": [
-              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": 0.1 } },
-              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": -0.1 } }
-            ],
-            "input": ["selection_id"],
-            "output": "reports/pipeline/"
-          }
-        },
-        "uiDataFlows": [
-          {
-            "from": "ctx-graph",
-            "to": "global-store",
-            "data": "selection.id",
-            "trigger": "node_click"
-          },
-          {
-            "from": "global-store",
-            "to": "ctx-aip",
-            "data": "selection",
-            "trigger": "selection_change"
-          },
-          {
-            "from": "global-store",
-            "to": "ctx-metrics",
-            "data": "selection",
-            "trigger": "selection_change"
-          },
-          {
-            "from": "ctx-aip",
-            "to": "ctx-graph",
-            "data": "execution.mode",
-            "trigger": "cot_generated"
-          },
-          {
-            "from": "ctx-graph",
-            "to": "pipelineRegistry",
-            "data": "pipeline_definition",
-            "trigger": "pipeline_saved"
-          },
-          {
-            "from": "ctx-aip",
-            "to": "ctx-metrics",
-            "data": "simulation_report_path",
-            "trigger": "action_executed"
-          }
-        ]
-      }
-    </script>
+                      {
+                        "project": "Kabuto",
+                        "infrastructure": {
+                          "db": "FalkorDB",
+                          "compute": "Polars-rs",
+                          "db_policy": "read_only_from_simulation"
+                        },
+                        "agent": {
+                          "model": "Gemini",
+                          "mode": "function_calling",
+                          "temperature": 0
+                        },
+                        "selection": { "id": "1605", "type": "Company", "name": "INPEX" },
+                        "execution": {
+                          "status": "idle",
+                          "mode": "GRAPH"
+                        },
+                        "operationPolicy": {
+                          "read": "auto",
+                          "simulation": "requires_approval",
+                          "fact_write": "requires_confirmation"
+                        },
+                        "simulation": {
+                          "output": "reports/",
+                          "format": "json",
+                          "note": "シミュレーション結果はレポートファイルとして出力。FalkorDBには書き戻さない。"
+                        },
+                        "actionRegistry": {
+                          "stress_test": {
+                            "when": "外部ショックが特定企業に与える影響を見たい時",
+                            "input": ["selection_id", "variable", "delta"],
+                            "output": ["impact_score", "affected_nodes"],
+                            "executor": "execute_script",
+                            "script": "scripts/stress_test.py",
+                            "writes_to": "simulation",
+                            "policy": "simulation"
+                          },
+                          "valuation_dcf": {
+                            "when": "企業の理論株価を算出したい時",
+                            "input": ["selection_id", "discount_rate", "forecast_years"],
+                            "output": ["fair_value", "upside_pct"],
+                            "executor": "execute_script",
+                            "script": "scripts/valuation_dcf.py",
+                            "writes_to": "simulation",
+                            "policy": "simulation"
+                          },
+                          "risk_scan": {
+                            "when": "ポートフォリオ全体のリスク分布を把握したい時",
+                            "input": ["selection_ids", "risk_factors"],
+                            "output": ["risk_matrix", "top_exposures"],
+                            "executor": "execute_script",
+                            "script": "scripts/risk_scan.py",
+                            "writes_to": "simulation",
+                            "policy": "simulation"
+                          },
+                          "run_pipeline": {
+                            "when": "登録済みの分析パイプラインを実行したい時",
+                            "input": ["pipeline_id", "selection_id"],
+                            "output": ["report_path"],
+                            "executor": "pipeline_runner",
+                            "writes_to": "simulation",
+                            "policy": "simulation"
+                          }
+                        },
+                        "pipelineRegistry": {
+                          "oil_sensitivity": {
+                            "label": "原油感応度分析",
+                            "description": "原油価格の上下変動が対象企業に与える影響を分析する",
+                            "steps": [
+                              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": 0.1 } },
+                              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": -0.1 } }
+                            ],
+                            "input": ["selection_id"],
+                            "output": "reports/pipeline/"
+                          }
+                        },
+                        "uiDataFlows": [
+                          {
+                            "from": "ctx-graph",
+                            "to": "global-store",
+                            "data": "selection.id",
+                            "trigger": "node_click"
+                          },
+                          {
+                            "from": "global-store",
+                            "to": "ctx-aip",
+                            "data": "selection",
+                            "trigger": "selection_change"
+                          },
+                          {
+                            "from": "global-store",
+                            "to": "ctx-metrics",
+                            "data": "selection",
+                            "trigger": "selection_change"
+                          },
+                          {
+                            "from": "ctx-aip",
+                            "to": "ctx-graph",
+                            "data": "execution.mode",
+                            "trigger": "cot_generated"
+                          },
+                          {
+                            "from": "ctx-graph",
+                            "to": "pipelineRegistry",
+                            "data": "pipeline_definition",
+                            "trigger": "pipeline_saved"
+                          },
+                          {
+                            "from": "ctx-aip",
+                            "to": "ctx-metrics",
+                            "data": "simulation_report_path",
+                            "trigger": "action_executed"
+                          }
+                        ]
+                      }
+        </script>
 
         <!-- ============================================================
-     TECH STACK
-     AIはこの定義をもとに、使用ライブラリ・制約・選定理由を参照する。
-============================================================ -->
+        TECH STACK
+        AIはこの定義をもとに、使用ライブラリ・制約・選定理由を参照する。
+        ============================================================ -->
         <script id="tech-stack" type="application/json">
-  {
-    "framework": "React 19 + TypeScript + Vite + Tauri 2",
-    "ui": {
-      "component_library": "shadcn/ui",
-      "styling": "Tailwind CSS v4",
-      "icons": "lucide-react",
-      "graph": "@xyflow/react"
-    },
-    "state": {
-      "global": "Zustand",
-      "validation": "Zod"
-    },
-    "data": {
-      "graph_db": "FalkorDB",
-      "compute": "Polars (via Tauri Rust bridge)",
-      "format": "Parquet / JSON"
-    },
-    "ai": {
-      "model": "Gemini",
-      "mode": "function_calling",
-      "temperature": 0
-    },
-    "test": {
-      "unit": "Vitest + React Testing Library",
-      "e2e": "Playwright"
-    }
-  }
-</script>
+                  {
+                    "framework": "React 19 + TypeScript + Vite + Tauri 2",
+                    "ui": {
+                      "component_library": "shadcn/ui",
+                      "styling": "Tailwind CSS v4",
+                      "icons": "lucide-react",
+                      "graph": "@xyflow/react"
+                    },
+                    "state": {
+                      "global": "Zustand",
+                      "validation": "Zod"
+                    },
+                    "data": {
+                      "graph_db": "FalkorDB",
+                      "compute": "Polars (via Tauri Rust bridge)",
+                      "format": "Parquet / JSON"
+                    },
+                    "ai": {
+                      "model": "Gemini",
+                      "mode": "function_calling",
+                      "temperature": 0
+                    },
+                    "test": {
+                      "unit": "Vitest + React Testing Library",
+                      "e2e": "Playwright"
+                    }
+                  }
+        </script>
 
         <style>
             :root {
@@ -330,6 +330,7 @@
             }
         </style>
     </head>
+
     <body>
 
         <header>
@@ -340,11 +341,11 @@
         </header>
 
         <!-- ============================================================
-         CTX-1: ONTOLOGY EXPLORER
-         責務: FalkorDB へのデータ投入・スキーマ定義（事実の管理）
-         DB アクセス: Write（手動トリガーのみ・fact_write承認必須）
-         注意: シミュレーション・パイプラインからは Write しない
-    ============================================================ -->
+             CTX-1: ONTOLOGY EXPLORER
+             責務: FalkorDB へのデータ投入・スキーマ定義（事実の管理）
+             DB アクセス: Write（手動トリガーのみ・fact_write承認必須）
+             注意: シミュレーション・パイプラインからは Write しない
+        ============================================================ -->
         <nav id="ctx-ontology" class="context-area">
             <div class="area-header">1. Ontology Explorer</div>
             <div class="scroll-container">
@@ -371,20 +372,20 @@
         </nav>
 
         <!-- ============================================================
-         CTX-2: CAUSAL GRAPH / PIPELINE BUILDER
-         責務: FalkorDB の可視化・selection 更新・実行計画可視化・パイプライン構築
-         DB アクセス: Read only（Cypher Query）
-         モード（execution.mode で切り替え）:
-           GRAPH    → 通常の因果グラフ（FalkorDBから描画）
-           COT      → Geminiの実行計画フロー（CoTグラフ）
-           PIPELINE → パイプライン構築GUI
-                      actionRegistry のノードをドラッグ&ドロップで接続
-                      完成したパイプラインを pipelineRegistry に登録
-         データフロー:
-           node_click    → global-store.selection を更新
-           cot_generated → ctx-aip から COT モードへの切替を受信
-           pipeline_saved → 構築したパイプラインを pipelineRegistry へ保存
-    ============================================================ -->
+             CTX-2: CAUSAL GRAPH / PIPELINE BUILDER
+             責務: FalkorDB の可視化・selection 更新・実行計画可視化・パイプライン構築
+             DB アクセス: Read only（Cypher Query）
+             モード（execution.mode で切り替え）:
+               GRAPH    → 通常の因果グラフ（FalkorDBから描画）
+               COT      → Geminiの実行計画フロー（CoTグラフ）
+               PIPELINE → パイプライン構築GUI
+                          actionRegistry のノードをドラッグ&ドロップで接続
+                          完成したパイプラインを pipelineRegistry に登録
+             データフロー:
+               node_click    → global-store.selection を更新
+               cot_generated → ctx-aip から COT モードへの切替を受信
+               pipeline_saved → 構築したパイプラインを pipelineRegistry へ保存
+        ============================================================ -->
         <main id="ctx-graph" class="context-area">
             <div class="area-header">2. Causal Graph / Pipeline Builder (React Flow Canvas)</div>
             <div class="scroll-container">
@@ -424,25 +425,25 @@
         </main>
 
         <!-- ============================================================
-         CTX-3: AIP LOGIC / CoT DEBUGGER
-         責務: Gemini Function Calling・CoT表示・実行・レポート出力
-         DB アクセス: なし（シミュレーション結果はレポートファイルへ）
-         Gemini が参照する tools:
-           - actionRegistry（単発アクション）
-           - pipelineRegistry（登録済みパイプライン） ← run_pipeline経由
-         データフロー:
-           1. global-store.selection を受け取り Gemini へ送信
-           2. Gemini の CoT(text) + functionCall を表示
-           3. ctx-graph に COT モードへの切替を指示
-           4. 承認後に Tauri Bridge 経由で execute_script を呼び出す
-           5. 結果を reports/ にファイル出力
-           6. レポートパスを ctx-metrics へ送信
-         実装方針:
-           - execute_script(script, args: JSON) でリビルド不要
-           - 引数は FalkorDB のオントロジーから制約（推測しない）
-           - FalkorDB への Write back は一切しない
-           - operationPolicy に従い承認レベルを自動判定
-    ============================================================ -->
+             CTX-3: AIP LOGIC / CoT DEBUGGER
+             責務: Gemini Function Calling・CoT表示・実行・レポート出力
+             DB アクセス: なし（シミュレーション結果はレポートファイルへ）
+             Gemini が参照する tools:
+               - actionRegistry（単発アクション）
+               - pipelineRegistry（登録済みパイプライン） ← run_pipeline経由
+             データフロー:
+               1. global-store.selection を受け取り Gemini へ送信
+               2. Gemini の CoT(text) + functionCall を表示
+               3. ctx-graph に COT モードへの切替を指示
+               4. 承認後に Tauri Bridge 経由で execute_script を呼び出す
+               5. 結果を reports/ にファイル出力
+               6. レポートパスを ctx-metrics へ送信
+             実装方針:
+               - execute_script(script, args: JSON) でリビルド不要
+               - 引数は FalkorDB のオントロジーから制約（推測しない）
+               - FalkorDB への Write back は一切しない
+               - operationPolicy に従い承認レベルを自動判定
+        ============================================================ -->
         <aside id="ctx-aip" class="context-area">
             <div class="area-header">3. AIP Logic / CoT Debugger</div>
             <div class="scroll-container">
@@ -514,14 +515,14 @@
         </aside>
 
         <!-- ============================================================
-         CTX-4: METRICS ENGINE
-         責務: Polars による計算・チャート描画・レポート読み込み
-         DB アクセス: Read only（Parquet）
-         トリガー:
-           - selection_change: 選択銘柄の時系列データをロード
-           - simulation_report_path: レポートファイルを読み込み
-                                     シミュレーション結果を予測エッジとして合成
-    ============================================================ -->
+             CTX-4: METRICS ENGINE
+             責務: Polars による計算・チャート描画・レポート読み込み
+             DB アクセス: Read only（Parquet）
+             トリガー:
+               - selection_change: 選択銘柄の時系列データをロード
+               - simulation_report_path: レポートファイルを読み込み
+                                         シミュレーション結果を予測エッジとして合成
+        ============================================================ -->
         <footer id="ctx-metrics" class="context-area" style="grid-column: 1 / -1;">
             <div class="area-header">4. Metrics Engine (Polars / Parquet)</div>
             <div style="display:flex; height: 100%; overflow: hidden;">
