@@ -1,343 +1,1259 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KABUTO — Design Comp</title>
+    <style>
+      /* ─── Tokens (shadcn/ui dark theme) ─────────────────────────────────── */
+      :root {
+        --background: #09090b;
+        --card: #0f1117;
+        --card-border: #1c1f2e;
+        --panel: #13161f;
+        --muted: #1e2231;
+        --muted-fg: #4b5263;
+        --border: #1e2333;
+        --input: #1a1d2a;
 
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Syne:wght@400;700&display=swap');
-  *{box-sizing:border-box;margin:0;padding:0}
-  :root{
-    --bg:#080c14;--panel:#0d1117;--panel2:#111827;--border:#1f2937;
-    --accent:#3b82f6;--action:#10b981;--warn:#f59e0b;--danger:#ef4444;
-    --text:#f3f4f6;--dim:#6b7280;--dim2:#9ca3af;
-    --font-head:'Syne',sans-serif;--font-mono:'IBM Plex Mono',monospace;
-  }
-  .root{
-    background:var(--bg);color:var(--text);
-    font-family:var(--font-mono);
-    display:grid;
-    grid-template-columns:280px 1fr 360px;
-    grid-template-rows:48px 1fr 220px;
-    height:580px;width:100%;overflow:hidden;
-    border:1px solid var(--border);border-radius:8px;
-  }
+        --fg: #e8eaf0;
+        --fg-dim: #6b7280;
+        --fg-subtle: #374151;
 
-  header{
-    grid-column:1/-1;
-    background:var(--panel);border-bottom:1px solid var(--border);
-    display:flex;align-items:center;padding:0 16px;gap:16px;
-    justify-content:space-between;
-  }
-  .logo{font-family:var(--font-head);font-size:13px;font-weight:700;letter-spacing:4px;color:var(--text)}
-  .logo span{color:var(--accent)}
-  .hbadge{
-    font-size:10px;padding:3px 8px;border-radius:3px;
-    background:#10b98120;color:var(--action);border:1px solid #10b98140;letter-spacing:1px;
-  }
-  .htabs{display:flex;gap:2px}
-  .htab{
-    font-size:10px;padding:4px 10px;border-radius:3px;cursor:pointer;letter-spacing:1px;
-    color:var(--dim);border:1px solid transparent;transition:all .15s;
-  }
-  .htab.active{color:var(--accent);border-color:var(--accent);background:#3b82f610}
-  .hright{display:flex;align-items:center;gap:10px}
-  .hsel{
-    font-family:var(--font-mono);font-size:11px;
-    background:var(--panel2);border:1px solid var(--border);
-    color:var(--accent);padding:4px 8px;border-radius:3px;
-  }
-  .hdot{width:6px;height:6px;border-radius:50%;background:var(--action)}
+        --accent: #3b82f6;
+        /* blue-500  */
+        --accent-dim: #1e3a5f;
+        --emerald: #10b981;
+        /* green */
+        --emerald-dim: #064e35;
+        --amber: #f59e0b;
+        --amber-dim: #451a00;
+        --red: #ef4444;
+        --red-dim: #450a0a;
+        --violet: #8b5cf6;
+        --violet-dim: #2e1065;
 
-  .panel{background:var(--panel);border:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+        --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+        --font-sans: 'DM Sans', 'Outfit', 'Segoe UI', system-ui, sans-serif;
+        --radius: 4px;
+      }
 
-  .ph{
-    padding:10px 14px;background:var(--panel2);border-bottom:1px solid var(--border);
-    font-size:9px;font-weight:500;letter-spacing:2px;color:var(--dim);
-    display:flex;align-items:center;justify-content:space-between;
-  }
-  .ph-badge{
-    font-size:9px;padding:2px 6px;border-radius:2px;
-    background:#ef444415;color:var(--danger);border:1px solid #ef444430;
-  }
-  .ph-badge.ok{background:#10b98115;color:var(--action);border-color:#10b98130}
-  .ph-badge.warn{background:#f59e0b15;color:var(--warn);border-color:#f59e0b30}
+      /* ─── Reset ──────────────────────────────────────────────────────────── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
 
-  .ps{flex:1;overflow-y:auto;padding:12px;scrollbar-width:thin;scrollbar-color:var(--border) transparent}
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
 
-  /* ctx-ontology */
-  #ctx-ontology{grid-column:1;grid-row:2}
-  .onto-item{
-    padding:10px 12px;margin-bottom:8px;
-    border-left:2px solid var(--border);
-    background:#1e293b20;transition:border-color .15s;
-  }
-  .onto-item:hover{border-left-color:var(--accent)}
-  .onto-label{font-size:10px;color:var(--dim);letter-spacing:1px;margin-bottom:4px}
-  .onto-val{font-size:12px;color:var(--text)}
-  .onto-val span{color:var(--accent)}
-  .onto-sector{
-    display:inline-block;font-size:9px;padding:2px 6px;
-    border-radius:2px;margin-top:4px;
-    background:#3b82f615;color:var(--accent);border:1px solid #3b82f630;
-  }
-  .onto-btn{
-    width:100%;margin-top:12px;padding:9px;
-    background:transparent;border:1px solid var(--border);
-    color:var(--dim2);font-family:var(--font-mono);font-size:10px;
-    letter-spacing:1px;border-radius:3px;cursor:pointer;transition:all .15s;
-  }
-  .onto-btn:hover{border-color:var(--accent);color:var(--accent)}
-  .onto-stats{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px}
-  .onto-stat{background:var(--panel2);padding:8px;border-radius:3px;text-align:center}
-  .onto-stat-n{font-size:18px;font-weight:500;color:var(--text)}
-  .onto-stat-l{font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:2px}
+      body {
+        background: var(--background);
+        color: var(--fg);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        display: grid;
+        grid-template-columns: 300px 1fr 400px;
+        grid-template-rows: 52px 1fr 240px;
+        height: 100vh;
+      }
 
-  /* ctx-graph */
-  #ctx-graph{grid-column:2;grid-row:2}
-  .graph-canvas{flex:1;position:relative;overflow:hidden;background:#060a10}
-  .graph-node{position:absolute;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:500;text-align:center;line-height:1.2;cursor:pointer}
-  .gn-company{background:#3b82f620;border:1px solid #3b82f660;color:#93c5fd}
-  .gn-sector{background:#10b98120;border:1px solid #10b98160;color:#6ee7b7}
-  .gn-macro{background:#f59e0b20;border:1px solid #f59e0b60;color:#fcd34d}
-  svg.edges{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}
-  .graph-toolbar{
-    position:absolute;bottom:10px;right:10px;display:flex;gap:4px;
-  }
-  .gtb{
-    padding:5px 10px;font-size:9px;letter-spacing:1px;
-    background:var(--panel2);border:1px solid var(--border);
-    color:var(--dim);border-radius:3px;cursor:pointer;font-family:var(--font-mono);
-  }
-  .gtb.active{border-color:var(--accent);color:var(--accent)}
-  .graph-overlay{
-    position:absolute;top:10px;left:10px;
-    background:#0d111790;backdrop-filter:blur(2px);
-    border:1px solid var(--border);border-radius:4px;padding:8px 10px;
-  }
-  .go-title{font-size:10px;color:var(--accent);font-weight:500;letter-spacing:1px}
-  .go-sub{font-size:9px;color:var(--dim);margin-top:2px}
+      /* ─── Header ─────────────────────────────────────────────────────────── */
+      header {
+        grid-column: 1 / -1;
+        background: var(--card);
+        border-bottom: 1px solid var(--card-border);
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        gap: 24px;
+        justify-content: space-between;
+        z-index: 50;
+      }
 
-  /* ctx-aip */
-  #ctx-aip{grid-column:3;grid-row:2}
-  .cot-block{
-    background:#0f172a;border:1px solid var(--border);
-    border-radius:3px;padding:10px;margin-bottom:8px;
-  }
-  .cot-thought{
-    font-size:10px;color:var(--dim2);font-style:italic;
-    line-height:1.6;margin-bottom:8px;
-    border-bottom:1px dotted var(--border);padding-bottom:8px;
-  }
-  .cot-fn{
-    font-size:10px;color:var(--action);font-weight:500;letter-spacing:1px;
-    margin-bottom:4px;
-  }
-  .cot-args{font-size:10px;color:var(--dim);line-height:1.5}
-  .cot-args span{color:var(--warn)}
-  .approval-box{
-    background:#0f172a;border:1px solid var(--warn);
-    border-radius:3px;padding:10px;margin-bottom:8px;
-  }
-  .appr-label{font-size:9px;color:var(--warn);letter-spacing:2px;margin-bottom:6px}
-  .appr-desc{font-size:10px;color:var(--dim2);line-height:1.5;margin-bottom:10px}
-  .btn-group{display:grid;grid-template-columns:1fr 2fr;gap:6px}
-  .btn{
-    padding:8px;font-weight:500;border:none;border-radius:3px;
-    cursor:pointer;font-size:10px;letter-spacing:1px;font-family:var(--font-mono);
-  }
-  .btn-cancel{background:#374151;color:var(--dim2)}
-  .btn-approve{background:var(--action);color:#000}
+      .header-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
 
-  /* ctx-metrics bottom */
-  #ctx-metrics{grid-column:1/-1;grid-row:3;display:flex;flex-direction:column}
-  .metrics-inner{flex:1;display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);overflow:hidden}
-  .metric-cell{background:var(--panel);padding:10px 14px}
-  .mc-label{font-size:9px;color:var(--dim);letter-spacing:1px;margin-bottom:6px}
-  .mc-val{font-size:20px;font-weight:500;font-family:var(--font-head);color:var(--text)}
-  .mc-sub{font-size:9px;margin-top:3px}
-  .mc-up{color:var(--action)}
-  .mc-dn{color:var(--danger)}
-  .mc-chart{height:36px;display:flex;align-items:flex-end;gap:2px;margin-top:8px}
-  .mc-bar{border-radius:1px 1px 0 0;min-width:6px;flex:1}
-</style>
+      .header-logo {
+        font-family: var(--font-mono);
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        color: var(--fg);
+      }
 
-<div class="root">
-  <header>
-    <div style="display:flex;align-items:center;gap:14px">
-      <div class="logo">KABUTO <span>//</span> PALANTIR AIP</div>
-      <div class="hbadge">● DB: READ_ONLY</div>
-    </div>
-    <div class="htabs">
-      <div class="htab active">GRAPH</div>
-      <div class="htab">COT</div>
-      <div class="htab">PIPELINE</div>
-    </div>
-    <div class="hright">
-      <div class="hsel">1605 · INPEX · Energy</div>
-      <div class="hdot"></div>
-    </div>
-  </header>
+      .header-logo span {
+        color: var(--accent);
+      }
 
-  <!-- ctx-ontology -->
-  <div class="panel" id="ctx-ontology">
-    <div class="ph">
-      1. ONTOLOGY EXPLORER
-      <span class="ph-badge ok">SYNCED</span>
-    </div>
-    <div class="ps">
-      <div class="onto-stats">
-        <div class="onto-stat"><div class="onto-stat-n">3,842</div><div class="onto-stat-l">COMPANIES</div></div>
-        <div class="onto-stat"><div class="onto-stat-n">11</div><div class="onto-stat-l">SECTORS</div></div>
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 8px;
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .badge-green {
+        background: var(--emerald-dim);
+        color: var(--emerald);
+        border: 1px solid #065f46;
+      }
+
+      .badge-blue {
+        background: var(--accent-dim);
+        color: var(--accent);
+        border: 1px solid #1e40af;
+      }
+
+      .badge-amber {
+        background: var(--amber-dim);
+        color: var(--amber);
+        border: 1px solid #78350f;
+      }
+
+      .badge-red {
+        background: var(--red-dim);
+        color: var(--red);
+        border: 1px solid #7f1d1d;
+      }
+
+      .badge-muted {
+        background: var(--muted);
+        color: var(--fg-dim);
+        border: 1px solid var(--border);
+      }
+
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: currentColor;
+      }
+
+      .header-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .selection-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 12px;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+
+      .selection-chip .ticker {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--accent);
+      }
+
+      .selection-chip .name {
+        font-size: 12px;
+        color: var(--fg-dim);
+      }
+
+      .selection-chip .price {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        color: var(--emerald);
+      }
+
+      /* ─── Shared Panel Shell ─────────────────────────────────────────────── */
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        margin: 3px;
+        border-radius: var(--radius);
+      }
+
+      .panel-header {
+        padding: 8px 14px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-shrink: 0;
+      }
+
+      .panel-title {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+      }
+
+      .panel-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .panel-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        scrollbar-width: thin;
+        scrollbar-color: var(--muted) transparent;
+      }
+
+      /* ─── Buttons ─────────────────────────────────────────────────────────── */
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 10px;
+        border-radius: var(--radius);
+        border: 1px solid transparent;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        cursor: pointer;
+        transition: all .15s;
+        white-space: nowrap;
+      }
+
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+        border-color: var(--accent);
+      }
+
+      .btn-outline {
+        background: transparent;
+        color: var(--fg-dim);
+        border-color: var(--border);
+      }
+
+      .btn-outline:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      .btn-ghost {
+        background: transparent;
+        color: var(--fg-dim);
+        border: none;
+      }
+
+      .btn-ghost:hover {
+        color: var(--fg);
+      }
+
+      .btn-emerald {
+        background: var(--emerald);
+        color: #000;
+        font-weight: 700;
+      }
+
+      .btn-danger {
+        background: var(--red-dim);
+        color: var(--red);
+        border-color: var(--red);
+      }
+
+      .btn-sm {
+        padding: 3px 7px;
+        font-size: 9px;
+      }
+
+      /* ─── CTX-1: ONTOLOGY EXPLORER ───────────────────────────────────────── */
+      #ctx-ontology {
+        grid-row: 2;
+      }
+
+      .status-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+      }
+
+      .status-label {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--fg-dim);
+        letter-spacing: 0.08em;
+      }
+
+      .ingest-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+
+      .ingest-card-title {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--fg);
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .ingest-card p {
+        font-size: 11px;
+        color: var(--fg-dim);
+        line-height: 1.7;
+        margin-bottom: 8px;
+      }
+
+      .stat-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+
+      .stat-box {
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 8px;
+      }
+
+      .stat-box .val {
+        font-family: var(--font-mono);
+        font-size: 18px;
+        font-weight: 700;
+        color: var(--fg);
+        line-height: 1;
+      }
+
+      .stat-box .lbl {
+        font-size: 9px;
+        color: var(--fg-dim);
+        margin-top: 3px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      .confirm-dialog {
+        background: var(--panel);
+        border: 1px solid var(--amber);
+        border-radius: var(--radius);
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+
+      .confirm-dialog-title {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--amber);
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+
+      .confirm-dialog p {
+        font-size: 11px;
+        color: var(--fg-dim);
+        line-height: 1.6;
+        margin-bottom: 10px;
+      }
+
+      .confirm-summary {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--amber);
+        margin-bottom: 10px;
+      }
+
+      .confirm-btns {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 8px;
+      }
+
+      .schema-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .schema-item:last-child {
+        border-bottom: none;
+      }
+
+      .schema-item .node-label {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--violet);
+      }
+
+      .schema-item .prop-count {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--fg-dim);
+      }
+
+      /* ─── CTX-2: GRAPH ───────────────────────────────────────────────────── */
+      #ctx-graph {
+        grid-row: 2;
+      }
+
+      .mode-tabs {
+        display: flex;
+        gap: 2px;
+      }
+
+      .mode-tab {
+        padding: 3px 10px;
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        cursor: pointer;
+        border: 1px solid transparent;
+        color: var(--fg-dim);
+        background: transparent;
+      }
+
+      .mode-tab.active {
+        background: var(--accent-dim);
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+
+      .mode-tab:not(.active):hover {
+        color: var(--fg);
+      }
+
+      .graph-canvas {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+        background:
+          radial-gradient(ellipse 80% 60% at 50% 40%, #1e2a4020 0%, transparent 70%),
+          var(--card);
+      }
+
+      /* Grid dots */
+      .graph-canvas::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image:
+          radial-gradient(circle, var(--muted-fg) 0.5px, transparent 0.5px);
+        background-size: 28px 28px;
+        opacity: 0.25;
+      }
+
+      .graph-node {
+        position: absolute;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-weight: 700;
+        cursor: pointer;
+        transition: transform .2s;
+      }
+
+      .graph-node:hover {
+        transform: scale(1.15);
+      }
+
+      .node-company {
+        width: 52px;
+        height: 52px;
+        background: var(--accent-dim);
+        border: 2px solid var(--accent);
+        color: var(--accent);
+        font-size: 9px;
+      }
+
+      .node-company.selected {
+        background: var(--accent);
+        color: #fff;
+        box-shadow: 0 0 20px #3b82f680;
+      }
+
+      .node-sector {
+        width: 40px;
+        height: 40px;
+        background: var(--violet-dim);
+        border: 1.5px solid var(--violet);
+        color: var(--violet);
+        font-size: 8px;
+      }
+
+      .node-index {
+        width: 34px;
+        height: 34px;
+        background: var(--emerald-dim);
+        border: 1.5px solid var(--emerald);
+        color: var(--emerald);
+        font-size: 8px;
+      }
+
+      .graph-label {
+        position: absolute;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--fg-dim);
+        pointer-events: none;
+        white-space: nowrap;
+      }
+
+      /* SVG edge lines */
+      .graph-edges {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+
+      .graph-zoom-controls {
+        position: absolute;
+        bottom: 12px;
+        right: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .graph-info {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: #0f111780;
+        backdrop-filter: blur(8px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 10px;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--fg-dim);
+        line-height: 1.8;
+      }
+
+      /* ─── CTX-3: AIP / CoT ───────────────────────────────────────────────── */
+      #ctx-aip {
+        grid-row: 2;
+      }
+
+      .chat-messages {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .msg {
+        padding: 10px 12px;
+        border-radius: var(--radius);
+        font-size: 12px;
+        line-height: 1.7;
+      }
+
+      .msg-user {
+        background: var(--accent-dim);
+        border: 1px solid #1e40af;
+        color: var(--fg);
+        align-self: flex-end;
+        max-width: 90%;
+      }
+
+      .msg-gemini {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        color: var(--fg-dim);
+      }
+
+      .msg-label {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        margin-bottom: 5px;
+        text-transform: uppercase;
+      }
+
+      .msg-user .msg-label {
+        color: var(--accent);
+      }
+
+      .msg-gemini .msg-label {
+        color: var(--fg-dim);
+      }
+
+      .cot-thought {
+        background: var(--muted);
+        border-left: 3px solid var(--violet);
+        padding: 8px 10px;
+        font-size: 11px;
+        color: var(--fg-dim);
+        font-style: italic;
+        line-height: 1.7;
+        border-radius: 0 var(--radius) var(--radius) 0;
+        margin-bottom: 8px;
+      }
+
+      .plan-card {
+        background: #fbbf2408;
+        border: 1px solid var(--amber);
+        border-radius: var(--radius);
+        padding: 10px;
+        margin-bottom: 8px;
+      }
+
+      .plan-card-header {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 700;
+        color: var(--amber);
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+
+      .plan-code {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        line-height: 1.9;
+        color: var(--fg);
+      }
+
+      .plan-code .key {
+        color: var(--fg-dim);
+      }
+
+      .plan-code .val {
+        color: var(--emerald);
+      }
+
+      .plan-code .step {
+        color: var(--accent);
+      }
+
+      .report-line {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--emerald);
+        background: #000;
+        padding: 6px 8px;
+        border-radius: var(--radius);
+        margin-top: 6px;
+        line-height: 1.6;
+      }
+
+      .approval-btns {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .chat-input-row {
+        display: flex;
+        gap: 6px;
+        padding: 10px 12px;
+        background: var(--panel);
+        border-top: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+
+      .chat-input {
+        flex: 1;
+        background: var(--input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 10px;
+        font-family: var(--font-sans);
+        font-size: 12px;
+        color: var(--fg);
+        outline: none;
+      }
+
+      .chat-input::placeholder {
+        color: var(--fg-subtle);
+      }
+
+      .chat-input:focus {
+        border-color: var(--accent);
+      }
+
+      /* ─── CTX-4: METRICS ────────────────────────────────────────────────── */
+      #ctx-metrics {
+        grid-column: 1 / -1;
+        grid-row: 3;
+        flex-direction: row;
+      }
+
+      .metrics-section {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        border-right: 1px solid var(--border);
+        overflow: hidden;
+      }
+
+      .metrics-section:last-child {
+        border-right: none;
+      }
+
+      .chart-area {
+        flex: 1;
+        position: relative;
+        padding: 8px 12px;
+        overflow: hidden;
+      }
+
+      .chart-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 6px;
+      }
+
+      .chart-title {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--fg);
+        letter-spacing: 0.05em;
+      }
+
+      .chart-meta {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--emerald);
+      }
+
+      /* SVG chart */
+      .chart-svg {
+        width: 100%;
+        height: 100%;
+        overflow: visible;
+      }
+
+      .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 6px;
+        padding: 8px 12px;
+        flex-shrink: 0;
+        border-top: 1px solid var(--border);
+      }
+
+      .kpi {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 8px;
+      }
+
+      .kpi-val {
+        font-family: var(--font-mono);
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1;
+        margin-bottom: 2px;
+      }
+
+      .kpi-lbl {
+        font-size: 9px;
+        color: var(--fg-dim);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+      }
+
+      .up {
+        color: var(--emerald);
+      }
+
+      .down {
+        color: var(--red);
+      }
+
+      .neu {
+        color: var(--fg);
+      }
+
+      /* sim overlay line */
+      .sim-legend {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 0 12px 6px;
+        flex-shrink: 0;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--fg-dim);
+      }
+
+      .legend-line {
+        width: 20px;
+        height: 2px;
+        border-radius: 1px;
+      }
+
+      /* ─── Scrollbar ───────────────────────────────────────────────────────── */
+      ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      ::-webkit-scrollbar-thumb {
+        background: var(--muted);
+        border-radius: 2px;
+      }
+
+      /* ─── Separator ───────────────────────────────────────────────────────── */
+      .sep {
+        width: 1px;
+        height: 20px;
+        background: var(--border);
+      }
+
+      /* ─── Divider ──────────────────────────────────────────────────────────*/
+      .divider {
+        border: none;
+        border-top: 1px solid var(--border);
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+
+    <!-- ════════════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════════════ -->
+    <header>
+      <div class="header-brand">
+        <div class="header-logo">KABU<span>TO</span></div>
+        <div class="sep"></div>
+        <span class="badge badge-muted">v0.1.0</span>
+        <span class="badge badge-green"><span class="dot"></span>FalkorDB</span>
+        <span class="badge badge-muted">READ_ONLY_FROM_SIMULATION</span>
       </div>
-      <div class="onto-item">
-        <div class="onto-label">SELECTED NODE</div>
-        <div class="onto-val"><span>1605</span> · INPEX Corp.</div>
-        <div class="onto-sector">Energy</div>
+      <div class="header-right">
+        <div class="selection-chip">
+          <span class="ticker">1605</span>
+          <span class="name">INPEX CORPORATION</span>
+          <span class="price">▲ 2,341.0 +1.23%</span>
+        </div>
+        <span class="badge badge-blue">GRAPH MODE</span>
+        <span class="badge badge-muted">Gemini · idle</span>
       </div>
-      <div class="onto-item">
-        <div class="onto-label">MARKET</div>
-        <div class="onto-val">Prime Market</div>
-      </div>
-      <div class="onto-item">
-        <div class="onto-label">DATA PATHS</div>
-        <div class="onto-val" style="font-size:9px;color:var(--dim);word-break:break-all">D:/data/1605/price.parquet</div>
-      </div>
-      <div class="onto-item">
-        <div class="onto-label">SCHEMA VERSION</div>
-        <div class="onto-val"><span>v4</span> · 2024-01-15</div>
-      </div>
-      <button class="onto-btn">▲ MANUAL INGEST</button>
-    </div>
-  </div>
+    </header>
 
-  <!-- ctx-graph -->
-  <div class="panel" id="ctx-graph">
-    <div class="ph">2. CAUSAL GRAPH / PIPELINE BUILDER</div>
-    <div class="graph-canvas">
-      <svg class="edges">
-        <defs><marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#374151"/></marker></defs>
-        <line x1="50%" y1="50%" x2="30%" y2="30%" stroke="#3b82f640" stroke-width="1.5" marker-end="url(#arr)"/>
-        <line x1="50%" y1="50%" x2="70%" y2="28%" stroke="#3b82f640" stroke-width="1.5" marker-end="url(#arr)"/>
-        <line x1="50%" y1="50%" x2="20%" y2="65%" stroke="#10b98140" stroke-width="2" marker-end="url(#arr)"/>
-        <line x1="50%" y1="50%" x2="78%" y2="60%" stroke="#10b98140" stroke-width="1" marker-end="url(#arr)"/>
-        <line x1="30%" y1="30%" x2="18%" y2="45%" stroke="#f59e0b40" stroke-width="1" marker-end="url(#arr)"/>
-        <line x1="70%" y1="28%" x2="82%" y2="42%" stroke="#3b82f640" stroke-width="1" marker-end="url(#arr)"/>
-        <line x1="20%" y1="65%" x2="38%" y2="78%" stroke="#10b98130" stroke-width="1" marker-end="url(#arr)"/>
-        <line x1="78%" y1="60%" x2="62%" y2="76%" stroke="#3b82f630" stroke-width="1" marker-end="url(#arr)"/>
-      </svg>
-      <!-- sector nodes -->
-      <div class="graph-node gn-sector" style="width:52px;height:52px;left:calc(20%-26px);top:calc(65%-26px)">Financials</div>
-      <div class="graph-node gn-sector" style="width:48px;height:48px;left:calc(78%-24px);top:calc(60%-24px)">Industrials</div>
-      <!-- company nodes -->
-      <div class="graph-node gn-company" style="width:64px;height:64px;left:calc(50%-32px);top:calc(50%-32px);border-width:2px;font-size:10px;font-weight:600">INPEX<br>1605</div>
-      <div class="graph-node gn-company" style="width:44px;height:44px;left:calc(30%-22px);top:calc(30%-22px)">JXTG<br>5020</div>
-      <div class="graph-node gn-company" style="width:44px;height:44px;left:calc(70%-22px);top:calc(28%-22px)">Cosmo<br>5040</div>
-      <div class="graph-node gn-company" style="width:36px;height:36px;left:calc(18%-18px);top:calc(45%-18px)">出光<br>5019</div>
-      <div class="graph-node gn-company" style="width:36px;height:36px;left:calc(82%-18px);top:calc(42%-18px)">JFE<br>5411</div>
-      <!-- macro nodes -->
-      <div class="graph-node gn-macro" style="width:40px;height:40px;left:calc(38%-20px);top:calc(78%-20px)">原油<br>WTI</div>
-      <div class="graph-node gn-macro" style="width:40px;height:40px;left:calc(62%-20px);top:calc(76%-20px)">USD<br>JPY</div>
-
-      <div class="graph-overlay">
-        <div class="go-title">INPEX · 1605</div>
-        <div class="go-sub">Energy · Prime · ¥1,847</div>
-      </div>
-      <div class="graph-toolbar">
-        <div class="gtb active">GRAPH</div>
-        <div class="gtb">COT</div>
-        <div class="gtb">PIPELINE</div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ctx-aip -->
-  <div class="panel" id="ctx-aip">
-    <div class="ph">
-      3. AIP LOGIC / COT DEBUGGER
-      <span class="ph-badge warn">AWAITING</span>
-    </div>
-    <div class="ps">
-      <div class="cot-block">
-        <div class="cot-thought">INPEXは原油感応度が高い。WTI+10%シナリオで株価影響をストレステストする。DCFによる理論株価との乖離も同時に算出する。</div>
-        <div class="cot-fn">▶ stress_test</div>
-        <div class="cot-args">
-          selection_id: <span>"1605"</span><br>
-          variable: <span>"crude_oil"</span><br>
-          delta: <span>+0.10</span>
+    <!-- ════════════════════════════════════════════════════════════════
+     CTX-1: ONTOLOGY EXPLORER
+════════════════════════════════════════════════════════════════ -->
+    <nav id="ctx-ontology" class="panel">
+      <div class="panel-header">
+        <span class="panel-title">01 · Ontology Explorer</span>
+        <div class="panel-actions">
+          <span class="badge badge-amber">fact_write</span>
+          <button class="btn btn-outline btn-sm">↻ 手動更新</button>
         </div>
       </div>
-      <div class="approval-box">
-        <div class="appr-label">⚠ SIMULATION · REQUIRES APPROVAL</div>
-        <div class="appr-desc">stress_test を実行します。結果は reports/ に出力されます。FalkorDB への書き込みは行いません。</div>
-        <div class="btn-group">
-          <button class="btn btn-cancel">CANCEL</button>
-          <button class="btn btn-approve">▶ APPROVE</button>
-        </div>
-      </div>
-    </div>
-  </div>
+      <div class="panel-body">
 
-  <!-- ctx-metrics -->
-  <div class="panel" id="ctx-metrics">
-    <div class="ph">4. SIMULATION METRICS · 1605 · INPEX</div>
-    <div class="metrics-inner">
-      <div class="metric-cell">
-        <div class="mc-label">CURRENT PRICE</div>
-        <div class="mc-val">¥1,847</div>
-        <div class="mc-sub mc-up">▲ +2.3%</div>
-        <div class="mc-chart">
-          <div class="mc-bar" style="height:40%;background:#3b82f640"></div>
-          <div class="mc-bar" style="height:55%;background:#3b82f640"></div>
-          <div class="mc-bar" style="height:45%;background:#3b82f640"></div>
-          <div class="mc-bar" style="height:70%;background:#3b82f640"></div>
-          <div class="mc-bar" style="height:65%;background:#3b82f640"></div>
-          <div class="mc-bar" style="height:85%;background:#3b82f660"></div>
-          <div class="mc-bar" style="height:100%;background:#3b82f6"></div>
+        <!-- Status -->
+        <div class="status-row">
+          <span class="status-label">STATE</span>
+          <span class="badge badge-green"><span class="dot"></span>idle</span>
+          <span class="status-label" style="margin-left:8px;">LAST UPDATE</span>
+          <span style="font-family:var(--font-mono);font-size:10px;color:var(--fg-dim);">2025-04-28</span>
+        </div>
+
+        <!-- Schema overview -->
+        <div class="ingest-card">
+          <div class="ingest-card-title">Graph Schema</div>
+          <div class="schema-item">
+            <span class="node-label">Company</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span class="badge badge-muted">3,935 nodes</span>
+              <span class="prop-count">4 props</span>
+            </div>
+          </div>
+          <div class="schema-item">
+            <span class="node-label">Sector</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span class="badge badge-muted">33 nodes</span>
+              <span class="prop-count">2 props</span>
+            </div>
+          </div>
+          <div class="schema-item">
+            <span class="node-label">Market</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span class="badge badge-muted">3 nodes</span>
+              <span class="prop-count">1 props</span>
+            </div>
+          </div>
+          <div class="schema-item">
+            <span style="font-family:var(--font-mono);font-size:11px;color:var(--fg-dim);">BELONGS_TO</span>
+            <span class="badge badge-muted">3,935 edges</span>
+          </div>
+        </div>
+
+        <!-- Confirm dialog (confirming_write state mock) -->
+        <div class="confirm-dialog">
+          <div class="confirm-dialog-title">⚠ fact_write · 確認必須</div>
+          <p>JPX CSV からデータをインポートし FalkorDB に書き込みます。この操作は取り消せません。</p>
+          <div class="confirm-summary">3,935 companies · 33 sectors · 3 markets</div>
+          <div class="confirm-btns">
+            <button class="btn btn-outline">キャンセル</button>
+            <button class="btn btn-emerald">確認して書き込み</button>
+          </div>
+        </div>
+
+        <!-- Object Mapping -->
+        <div class="ingest-card">
+          <div class="ingest-card-title">Object Mapping</div>
+          <p>Parquet (株価履歴) / XBRL (財務) の絶対パスを URI プロパティとして紐付け</p>
+          <div class="stat-row">
+            <div class="stat-box">
+              <div class="val" style="color:var(--emerald);">3,812</div>
+              <div class="lbl">Parquet linked</div>
+            </div>
+            <div class="stat-box">
+              <div class="val" style="color:var(--accent);">2,104</div>
+              <div class="lbl">XBRL linked</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </nav>
+
+    <!-- ════════════════════════════════════════════════════════════════
+     CTX-2: CAUSAL GRAPH
+════════════════════════════════════════════════════════════════ -->
+    <main id="ctx-graph" class="panel">
+      <div class="panel-header">
+        <span class="panel-title">02 · Causal Graph / Pipeline Builder</span>
+        <div class="panel-actions">
+          <div class="mode-tabs">
+            <button class="mode-tab active">GRAPH</button>
+            <button class="mode-tab">COT</button>
+            <button class="mode-tab">PIPELINE</button>
+          </div>
         </div>
       </div>
-      <div class="metric-cell">
-        <div class="mc-label">FAIR VALUE (DCF)</div>
-        <div class="mc-val">¥2,104</div>
-        <div class="mc-sub mc-up">↑ +13.9% upside</div>
-        <div class="mc-chart">
-          <div class="mc-bar" style="height:60%;background:#10b98130"></div>
-          <div class="mc-bar" style="height:65%;background:#10b98130"></div>
-          <div class="mc-bar" style="height:72%;background:#10b98130"></div>
-          <div class="mc-bar" style="height:68%;background:#10b98130"></div>
-          <div class="mc-bar" style="height:80%;background:#10b98130"></div>
-          <div class="mc-bar" style="height:90%;background:#10b98140"></div>
-          <div class="mc-bar" style="height:100%;background:#10b981"></div>
+
+      <!-- Graph canvas -->
+      <div class="graph-canvas">
+
+        <!-- Info overlay -->
+        <div class="graph-info">
+          NODES 42 · EDGES 87 · DEPTH 3<br>
+          LAYOUT dagre · ZOOM 0.8x
+        </div>
+
+        <!-- SVG edges -->
+        <svg class="graph-edges" viewBox="0 0 700 400" preserveAspectRatio="none">
+          <defs>
+            <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#3b82f640" />
+            </marker>
+          </defs>
+          <!-- Company → Sector edges -->
+          <line x1="160" y1="180" x2="340" y2="110" stroke="#3b82f630" stroke-width="1.5" marker-end="url(#arrow)" />
+          <line x1="260" y1="220" x2="340" y2="110" stroke="#3b82f620" stroke-width="1" />
+          <line x1="200" y1="300" x2="340" y2="110" stroke="#3b82f615" stroke-width="1" />
+          <line x1="420" y1="200" x2="340" y2="110" stroke="#3b82f620" stroke-width="1" />
+          <line x1="500" y1="260" x2="340" y2="110" stroke="#3b82f615" stroke-width="1" />
+          <!-- Sector → Index -->
+          <line x1="340" y1="110" x2="580" y2="150" stroke="#8b5cf630" stroke-width="1.5" marker-end="url(#arrow)" />
+          <!-- Simulation edge (dashed) -->
+          <line x1="160" y1="180" x2="260" y2="220" stroke="#10b98140" stroke-width="1" stroke-dasharray="4 3" />
+          <line x1="260" y1="220" x2="200" y2="300" stroke="#10b98130" stroke-width="1" stroke-dasharray="4 3" />
+        </svg>
+
+        <!-- INPEX (selected) -->
+        <div class="graph-node node-company selected" style="left:130px;top:155px;">
+          <span>1605</span>
+        </div>
+        <div class="graph-label" style="left:108px;top:213px;">INPEX</div>
+
+        <!-- Other companies -->
+        <div class="graph-node node-company" style="left:232px;top:198px;"><span>5020</span></div>
+        <div class="graph-label" style="left:222px;top:250px;font-size:8px;">ENEOS</div>
+
+        <div class="graph-node node-company" style="left:172px;top:276px;"><span>1662</span></div>
+        <div class="graph-label" style="left:158px;top:330px;font-size:8px;">石油資源</div>
+
+        <div class="graph-node node-company" style="left:390px;top:176px;"><span>9101</span></div>
+        <div class="graph-label" style="left:378px;top:230px;font-size:8px;">郵船</div>
+
+        <div class="graph-node node-company" style="left:472px;top:236px;"><span>6758</span></div>
+        <div class="graph-label" style="left:458px;top:290px;font-size:8px;">SONYグループ</div>
+
+        <!-- Sector node -->
+        <div class="graph-node node-sector" style="left:320px;top:90px;"><span>ENE</span></div>
+        <div class="graph-label" style="left:304px;top:136px;">Energy</div>
+
+        <!-- Index node -->
+        <div class="graph-node node-index" style="left:563px;top:133px;"><span>N225</span></div>
+        <div class="graph-label" style="left:550px;top:172px;">日経225</div>
+
+        <!-- Zoom controls -->
+        <div class="graph-zoom-controls">
+          <button class="btn btn-outline btn-sm">+</button>
+          <button class="btn btn-outline btn-sm">−</button>
+          <button class="btn btn-outline btn-sm">⊡</button>
         </div>
       </div>
-      <div class="metric-cell">
-        <div class="mc-label">STRESS · WTI +10%</div>
-        <div class="mc-val" style="color:var(--action)">+¥184</div>
-        <div class="mc-sub mc-up">▲ +9.9% impact</div>
-        <div class="mc-chart">
-          <div class="mc-bar" style="height:30%;background:#10b98120"></div>
-          <div class="mc-bar" style="height:40%;background:#10b98120"></div>
-          <div class="mc-bar" style="height:55%;background:#10b98130"></div>
-          <div class="mc-bar" style="height:65%;background:#10b98140"></div>
-          <div class="mc-bar" style="height:80%;background:#10b98150"></div>
-          <div class="mc-bar" style="height:92%;background:#10b98160"></div>
-          <div class="mc-bar" style="height:100%;background:#10b981"></div>
+    </main>
+
+    <!-- ════════════════════════════════════════════════════════════════
+     CTX-3: AIP LOGIC / CoT DEBUGGER
+════════════════════════════════════════════════════════════════ -->
+    <aside id="ctx-aip" class="panel">
+      <div class="panel-header">
+        <span class="panel-title">03 · AIP Logic / CoT Debugger</span>
+        <div class="panel-actions">
+          <span class="badge badge-amber">simulation · 承認待ち</span>
         </div>
       </div>
-      <div class="metric-cell">
-        <div class="mc-label">RISK SCORE</div>
-        <div class="mc-val" style="color:var(--warn)">7.2</div>
-        <div class="mc-sub" style="color:var(--warn)">▲ HIGH SENSITIVITY</div>
-        <div class="mc-chart">
-          <div class="mc-bar" style="height:50%;background:#f59e0b30"></div>
-          <div class="mc-bar" style="height:60%;background:#f59e0b30"></div>
-          <div class="mc-bar" style="height:55%;background:#f59e0b40"></div>
-          <div class="mc-bar" style="height:75%;background:#f59e0b50"></div>
-          <div class="mc-bar" style="height:82%;background:#f59e0b60"></div>
-          <div class="mc-bar" style="height:88%;background:#f59e0b70"></div>
-          <div class="mc-bar" style="height:100%;background:#f59e0b"></div>
+      <div class="panel-body">
+        <div class="chat-messages">
+
+          <!-- User message -->
+          <div class="msg msg-user">
+            <div class="msg-label">USER</div>
+            INPEX(1605)の原油価格感応度を分析してください
+          </div>
+
+          <!-- Gemini CoT -->
+          <div class="msg msg-gemini">
+            <div class="msg-label">GEMINI · function_calling · T=0</div>
+            <div class="cot-thought">
+              "INPEX(1605)の原油感応度を分析します。登録済みパイプライン「oil_sensitivity」が最適です。stress_test(+10%) と stress_test(-10%)
+              を順次実行し、結果をレポートとして出力します。"
+            </div>
+            <div class="plan-card">
+              <div class="plan-card-header">📋 Proposed Pipeline Execution</div>
+              <div class="plan-code">
+                <span class="key">pipeline: </span><span class="val">oil_sensitivity</span><br>
+                <span class="key">input: </span><span class="val">{ selection_id: "1605" }</span><br>
+                <span class="key">steps:</span><br>
+                <span class="step">&nbsp;&nbsp;1. </span><span class="val">stress_test</span>(crude_oil, <span
+                  class="val">+10%</span>)<br>
+                <span class="step">&nbsp;&nbsp;2. </span><span class="val">stress_test</span>(crude_oil, <span
+                  class="val">-10%</span>)
+              </div>
+              <div class="report-line">
+                # SIMULATION OUTPUT (FalkorDB は変更しない)<br>
+                → reports/pipeline/oil_sensitivity_1605_20250428.json
+              </div>
+            </div>
+            <div class="approval-btns">
+              <button class="btn btn-danger">キャンセル</button>
+              <button class="btn btn-emerald">承認して実行</button>
+            </div>
+          </div>
+
         </div>
       </div>
-      <div class="metric-cell">
-        <div class="mc-label">REPORT</div>
-        <div class="mc-val" style="font-size:11px;color:var(--dim);margin-top:4px;word-break:break-all;line-height:1.4">reports/<br>stress_1605<br>_20240115.json</div>
-        <div class="mc-sub" style="color:var(--dim);margin-top:4px">2.4 KB · READY</div>
+      <div class="chat-input-row">
+        <input class="chat-input" type="text" placeholder="銘柄・分析内容を入力… (1605, 原油感応度)" />
+        <button class="btn btn-primary">→</button>
       </div>
-    </div>
-  </div>
-</div>
+    </aside>
+
+    <!-- ════════════════════════════════════════════════════════════════
+     CTX-4: METRICS ENGINE
+════════════════════════════════════════════════════════════════ -->
+    <footer id="ctx-metrics" class="panel" style="flex-direction:row;">
+
+      <!-- Section A: Price chart -->
+      <div class="metrics-section">
+        <div class="panel-header">
+          <span class="panel-title">Price · 1605 INPEX</span>
+          <div class="panel-actions">
+            <button class="btn btn-ghost btn-sm">1W</button>
+            <button class="btn btn-ghost btn-sm">1M</button>
+            <button class="btn btn-outline btn-sm">1Y</button>
+            <button class="btn btn-ghost btn-sm">5Y</button>
+          </div>
+        </div>
+        <div class="chart-area">
+          <svg class="chart-svg" viewBox="0 0 780 90" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.35" />
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <!-- 出来高バー (最下部帯) -->
+            <rect x="0" y="76" width="18" height="12" fill="url(#volGrad)" />
+            <rect x="26" y="70" width="18" height="18" fill="url(#volGrad)" />
+            <rect x="52" y="78" width="18" height="10" fill="url(#volGrad)" />
+            <rect x="78" y="73" width="18" height="15" fill="url(#volGrad)" />
+            <rect x="104" y="68" width="18" height="20" fill="url(#volGrad)" />
+            <rect x="130" y="74" width="18" height="14" fill="url(#volGrad)" />
+            <rect x="156" y="66" width="18" height="22" fill="url(#volGrad)" />
+            <rect x="182" y="72" width="18" height="16" fill="url(#volGrad)" />
+            <rect x="208" y="80" width="18" height="8" fill="url(#volGrad)" />
+            <rect x="234" y="64" width="18" height="24" fill="url(#volGrad)" />
+            <rect x="260" y="70" width="18" height="18" fill="url(#volGrad)" />
+            <rect x="286" y="76" width="18" height="12" fill="url(#volGrad)" />
+            <rect x="312" y="60" width="18" height="28" fill="url(#volGrad)" />
+            <rect x="338" y="74" width="18" height="14" fill="url(#volGrad)" />
+            <rect x="364" y="68" width="18" height="20" fill="url(#volGrad)" />
+            <rect x="390" y="62" width="18" height="26" fill="url(#volGrad)" />
+            <rect x="416" y="76" width="18" height="12" fill="url(#volGrad)" />
+            <rect x="442" y="58" width="18" height="30" fill="url(#volGrad)" />
+            <rect x="468" y="72" width="18" height="16" fill="url(#volGrad)" />
+            <rect x="494" y="54" width="18" height="34" fill="url(#volGrad)" />
+            <rect x="520" y="66" width="18" height="22" fill="url(#volGrad)" />
+            <rect x="546" y="56" width="18" height="32" fill="url(#volGrad)" />
+            <rect x="572" y="62" width="18" height="26" fill="url(#volGrad)" />
+            <rect x="598" y="48" width="18" height="40" fill="url(#volGrad)" />
+            <rect x="624" y="60" width="18" height="28" fill="url(#volGrad)" />
+            <rect x="650" y="44" width="18" height="44" fill="url(#volGrad)" />
+            <rect x="676" y="52" width="18" height="36" fill="url(#volGrad)" />
+            <rect x="702" y="40" width="18" height="48" fill="url(#volGrad)" />
+            <rect x="728" y="48" width="18" height="40" fill="url(#volGrad)" />
+            <rect x="754" y="36" width="18" height="52" fill="url(#volGrad)" />
+            <!-- ローソク足 30本 (陽=emerald / 陰=red) ひげ+実体 -->
+            <line x1="9" y1="46" x2="9" y2="62" stroke="#4b5563" stroke-width="1" />
+            <rect x="3" y="50" width="12" height="6" fill="#10b981" />
+            <line x1="35" y1="38" x2="35" y2="58" stroke="#4b5563" stroke-width="1" />
+            <rect x="29" y="38" width="12" height="10" fill="#ef4444" />
+            <line x1="61" y1="42" x2="61" y2="60" stroke="#4b5563" stroke-width="1" />
+            <rect x="55" y="44" width="12" height="8" fill="#10b981" />
+            <line x1="87" y1="34" x2="87" y2="55" stroke="#4b5563" stroke-width="1" />
+            <rect x="81" y="38" width="12" height="10" fill="#10b981" />
+            <line x1="113" y1="30" x2="113" y2="50" stroke="#4b5563" stroke-width="1" />
+            <rect x="107" y="30" width="12" height="8" fill="#ef4444" />
+            <line x1="139" y1="32" x2="139" y2="52" stroke="#4b5563" stroke-width="1" />
+            <rect x="133" y="36" width="12" height="10" fill="#10b981" />
+            <line x1="165" y1="24" x2="165" y2="46" stroke="#4b5563" stroke-width="1" />
+            <rect x="159" y="26" width="12" height="12" fill="#10b981" />
+            <line x1="191" y1="26" x2="191" y2="48" stroke="#4b5563" stroke-width="1" />
+            <rect x="185" y="28" width="12" height="8" fill="#ef4444" />
+            <line x1="217" y1="30" x2="217" y2="50" stroke="#4b5563" stroke-width="1" />
+            <rect x="211" y="32" width="12" height="10" fill="#10b981" />
+            <line x1="243" y1="18" x2="243" y2="42" stroke="#4b5563" stroke-width="1" />
+            <rect x="237" y="20" width="12" height="14" fill="#10b981" />
+            <line x1="269" y1="20" x2="269" y2="40" stroke="#4b5563" stroke-width="1" />
+            <rect x="263" y="22" width="12" height="8" fill="#ef4444" />
+            <line x1="295" y1="22" x2="295" y2="44" stroke="#4b5563" stroke-width="1" />
+            <rect x="289" y="24" width="12" height="10" fill="#10b981" />
+            <line x1="321" y1="12" x2="321" y2="38" stroke="#4b5563" stroke-width="1" />
+            <rect x="315" y="14" width="12" height="14" fill="#10b981" />
+            <line x1="347" y1="16" x2="347" y2="38" stroke="#4b5563" stroke-width="1" />
+            <rect x="341" y="18" width="12" height="10" fill="#ef4444" />
+            <line x1="373" y1="14" x2="373" y2="36" stroke="#4b5563" stroke-width="1" />
+            <rect x="367" y="16" width="12" height="12" fill="#10b981" />
+            <line x1="399" y1="6" x2="399" y2="32" stroke="#4b5563" stroke-width="1" />
+            <rect x="393" y="8" width="12" height="14" fill="#10b981" />
+            <line x1="425" y1="10" x2="425" y2="34" stroke="#4b5563" stroke-width="1" />
+            <rect x="419" y="12" width="12" height="10" fill="#ef4444" />
+            <line x1="451" y1="4" x2="451" y2="28" stroke="#4b5563" stroke-width="1" />
+            <rect x="445" y="6" width="12" height="14" fill="#10b981" />
+            <line x1="477" y1="8" x2="477" y2="30" stroke="#4b5563" stroke-width="1" />
+            <rect x="471" y="10" width="12" height="10" fill="#ef4444" />
+            <line x1="503" y1="2" x2="503" y2="24" stroke="#4b5563" stroke-width="1" />
+            <rect x="497" y="4" width="12" height="12" fill="#10b981" />
+            <line x1="529" y1="4" x2="529" y2="26" stroke="#4b5563" stroke-width="1" />
+            <rect x="523" y="6" width="12" height="12" fill="#10b981" />
+            <line x1="555" y1="2" x2="555" y2="22" stroke="#4b5563" stroke-width="1" />
+            <rect x="549" y="4" width="12" height="10" fill="#10b981" />
+            <line x1="581" y1="4" x2="581" y2="24" stroke="#4b5563" stroke-width="1" />
+            <rect x="575" y="6" width="12" height="8" fill="#ef4444" />
+            <line x1="607" y1="2" x2="607" y2="20" stroke="#4b5563" stroke-width="1" />
+            <rect x="601" y="4" width="12" height="12" fill="#10b981" />
+            <line x1="633" y1="4" x2="633" y2="22" stroke="#4b5563" stroke-width="1" />
+            <rect x="627" y="6" width="12" height="10" fill="#ef4444" />
+            <line x1="659" y1="2" x2="659" y2="18" stroke="#4b5563" stroke-width="1" />
+            <rect x="653" y="4" width="12" height="10" fill="#10b981" />
+            <line x1="685" y1="4" x2="685" y2="20" stroke="#4b5563" stroke-width="1" />
+            <rect x="679" y="6" width="12" height="8" fill="#ef4444" />
+            <line x1="711" y1="2" x2="711" y2="16" stroke="#4b5563" stroke-width="1" />
+            <rect x="705" y="4" width="12" height="10" fill="#10b981" />
+            <line x1="737" y1="4" x2="737" y2="18" stroke="#4b5563" stroke-width="1" />
+            <rect x="731" y="6" width="12" height="8" fill="#ef4444" />
+            <!-- 最新足（amber枠で強調） -->
+            <line x1="763" y1="2" x2="763" y2="14" stroke="#f59e0b" stroke-width="1.5" />
+            <rect x="757" y="4" width="12" height="8" fill="#10b981" stroke="#f59e0b" stroke-width="1" />
+            <!-- 現在値ライン -->
+            <line x1="0" y1="4" x2="780" y2="4" stroke="#10b98130" stroke-width="0.5" stroke-dasharray="3 3" />
+          </svg>
+        </div>
+        <div class="kpi-grid" style="grid-template-columns: repeat(6,1fr);">
+          <div class="kpi">
+            <div class="kpi-val up">2,341</div>
+            <div class="kpi-lbl">現在値 (JPY)</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-val up">+28 (+1.21%)</div>
+            <div class="kpi-lbl">前日比</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-val neu">2,298</div>
+            <div class="kpi-lbl">本日 安値</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-val neu">2,356</div>
+            <div class="kpi-lbl">本日 高値</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-val neu">4.2M</div>
+            <div class="kpi-lbl">出来高</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-val neu">2.31T</div>
+            <div class="kpi-lbl">時価総額</div>
+          </div>
+        </div>
+      </div>
+
+
+
+    </footer>
+
+  </body>
+</html>
