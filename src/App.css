@@ -128,3 +128,22 @@
     @apply font-mono;
     }
 }
+/* ─── Kabuto Design Tokens (Mockup.html準拠) ─────────────────────────────── */
+:root {
+  --kabuto-bg:          #09090b;
+  --kabuto-card:        #0f1117;
+  --kabuto-panel:       #13161f;
+  --kabuto-muted:       #1e2231;
+  --kabuto-border:      #1e2333;
+  --kabuto-fg:          #e8eaf0;
+  --kabuto-fg-dim:      #6b7280;
+  --kabuto-accent:      #3b82f6;
+  --kabuto-accent-dim:  #1e3a5f;
+  --kabuto-emerald:     #10b981;
+  --kabuto-emerald-dim: #064e35;
+  --kabuto-amber:       #f59e0b;
+  --kabuto-amber-dim:   #451a00;
+  --kabuto-red:         #ef4444;
+  --kabuto-red-dim:     #450a0a;
+  --kabuto-violet:      #8b5cf6;
+}
