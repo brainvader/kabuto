@@ -29,7 +29,7 @@ import { test, expect } from '@playwright/test';
 test.describe('ctx-ontology Visual Story', () => {
     test('should satisfy the story steps with evidence', async ({ page }) => {
 
-        await page.goto('/');
+        await page.goto('http://localhost:1420');
 
         // Step 1: idle
         await expect(page.getByRole('button', { name: /手動更新/ })).toBeVisible();
@@ -41,7 +41,7 @@ test.describe('ctx-ontology Visual Story', () => {
         await page.screenshot({ path: 'evidence/ctx-ontology_02_loading.png' });
 
         // Step 4: confirming_write
-        await expect(page.getByText(/3 companies, 3 sectors/)).toBeVisible({ timeout: 10000 });
+        await expect(page.getByText(/3,935 companies · 33 sectors · 3 markets/)).toBeVisible({ timeout: 10000 });
         await page.screenshot({ path: 'evidence/ctx-ontology_03_confirming.png' });
 
         // Step 5-6: writing

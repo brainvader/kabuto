@@ -1,4 +1,5 @@
 import { OntologyPanel } from "./components/OntologyPanel";
+import './App.css';
 
 function App() {
   return (
