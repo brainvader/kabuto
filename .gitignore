@@ -26,3 +26,7 @@ dist-ssr
 # Playwright
 evidence/
 test-results/
+
+# Local working files (not tracked)
+code.path
+script.sh
