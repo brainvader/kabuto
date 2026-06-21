@@ -1,558 +1,942 @@
 <!DOCTYPE html>
 <html lang="ja">
-    <head>
-        <meta charset="UTF-8" />
-        <title>ContextMap: Kabuto - Palantir AIP Style Design Doc</title>
+  <head>
+    <meta charset="UTF-8" />
+    <title>ContextMap: Kabuto</title>
 
-        <!--
-                      GLOBAL STORE 設計方針:
-                      - FalkorDB = 事実（JPXデータ・銘柄属性）。シミュレーションで変更しない。
-                      - シミュレーション結果 = 別空間（レポートファイル）で管理。Write back なし。
-                      - actionRegistry は Gemini の単発 tools 定義と同一。
-                      - pipelineRegistry は GUI で構築・登録した承認済み分析フローの定義。
-                      - Gemini は actionRegistry と pipelineRegistry の両方を tools として参照する。
-                      - execution.mode が ctx-graph のモード切替を制御する。
-                        GRAPH    → 通常の因果グラフ
-                        COT      → Geminiの実行計画フロー(Chain of Thought)をグラフ化
-                        PIPELINE → パイプライン構築GUI（React Flowキャンバスを再利用）
-                      - operationPolicy で操作の危険度を分類する。
-                        read              → 承認不要
-                        simulation        → CoT表示 + 承認
-                        fact_write        → 確認ダイアログ必須
-                      - FalkorDB のバージョン管理（事実の変更）は将来課題。
-                        方針: Cypher スナップショットを Git 管理する想定。
-                    -->
-        <script id="global-store" type="application/json">
-                      {
-                        "project": "Kabuto",
-                        "infrastructure": {
-                          "db": "FalkorDB",
-                          "compute": "Polars-rs",
-                          "db_policy": "read_only_from_simulation"
-                        },
-                        "agent": {
-                          "model": "Gemini",
-                          "mode": "function_calling",
-                          "temperature": 0
-                        },
-                        "selection": { "id": "1605", "type": "Company", "name": "INPEX" },
-                        "execution": {
-                          "status": "idle",
-                          "mode": "GRAPH"
-                        },
-                        "operationPolicy": {
-                          "read": "auto",
-                          "simulation": "requires_approval",
-                          "fact_write": "requires_confirmation"
-                        },
-                        "simulation": {
-                          "output": "reports/",
-                          "format": "json",
-                          "note": "シミュレーション結果はレポートファイルとして出力。FalkorDBには書き戻さない。"
-                        },
-                        "actionRegistry": {
-                          "stress_test": {
-                            "when": "外部ショックが特定企業に与える影響を見たい時",
-                            "input": ["selection_id", "variable", "delta"],
-                            "output": ["impact_score", "affected_nodes"],
-                            "executor": "execute_script",
-                            "script": "scripts/stress_test.py",
-                            "writes_to": "simulation",
-                            "policy": "simulation"
-                          },
-                          "valuation_dcf": {
-                            "when": "企業の理論株価を算出したい時",
-                            "input": ["selection_id", "discount_rate", "forecast_years"],
-                            "output": ["fair_value", "upside_pct"],
-                            "executor": "execute_script",
-                            "script": "scripts/valuation_dcf.py",
-                            "writes_to": "simulation",
-                            "policy": "simulation"
-                          },
-                          "risk_scan": {
-                            "when": "ポートフォリオ全体のリスク分布を把握したい時",
-                            "input": ["selection_ids", "risk_factors"],
-                            "output": ["risk_matrix", "top_exposures"],
-                            "executor": "execute_script",
-                            "script": "scripts/risk_scan.py",
-                            "writes_to": "simulation",
-                            "policy": "simulation"
-                          },
-                          "run_pipeline": {
-                            "when": "登録済みの分析パイプラインを実行したい時",
-                            "input": ["pipeline_id", "selection_id"],
-                            "output": ["report_path"],
-                            "executor": "pipeline_runner",
-                            "writes_to": "simulation",
-                            "policy": "simulation"
-                          }
-                        },
-                        "pipelineRegistry": {
-                          "oil_sensitivity": {
-                            "label": "原油感応度分析",
-                            "description": "原油価格の上下変動が対象企業に与える影響を分析する",
-                            "steps": [
-                              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": 0.1 } },
-                              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": -0.1 } }
-                            ],
-                            "input": ["selection_id"],
-                            "output": "reports/pipeline/"
-                          }
-                        },
-                        "uiDataFlows": [
-                          {
-                            "from": "ctx-graph",
-                            "to": "global-store",
-                            "data": "selection.id",
-                            "trigger": "node_click"
-                          },
-                          {
-                            "from": "global-store",
-                            "to": "ctx-aip",
-                            "data": "selection",
-                            "trigger": "selection_change"
-                          },
-                          {
-                            "from": "global-store",
-                            "to": "ctx-metrics",
-                            "data": "selection",
-                            "trigger": "selection_change"
-                          },
-                          {
-                            "from": "ctx-aip",
-                            "to": "ctx-graph",
-                            "data": "execution.mode",
-                            "trigger": "cot_generated"
-                          },
-                          {
-                            "from": "ctx-graph",
-                            "to": "pipelineRegistry",
-                            "data": "pipeline_definition",
-                            "trigger": "pipeline_saved"
-                          },
-                          {
-                            "from": "ctx-aip",
-                            "to": "ctx-metrics",
-                            "data": "simulation_report_path",
-                            "trigger": "action_executed"
-                          }
-                        ]
-                      }
-        </script>
+    <!-- ============================================================
+         STACK
+         runtime:  Tauri 2
+         frontend: React 19 + TypeScript + Vite
+         router:   なし（単一ページ）
+         state:    Zustand
+         validation: Zod
+         ui:       shadcn/ui + Tailwind CSS v4
+         icons:    lucide-react
+         graph:    @xyflow/react
+         db:       FalkorDB (Tauri Rust bridge)
+         compute:  Polars-rs (Tauri Rust bridge)
+         ai:       Gemini function_calling, temperature=0
+         testing:  Vitest + RTL + Storybook + Playwright
+         package:  pnpm
+    ============================================================ -->
 
-        <!-- ============================================================
-        TECH STACK
-        AIはこの定義をもとに、使用ライブラリ・制約・選定理由を参照する。
-        ============================================================ -->
-        <script id="tech-stack" type="application/json">
-                  {
-                    "framework": "React 19 + TypeScript + Vite + Tauri 2",
-                    "ui": {
-                      "component_library": "shadcn/ui",
-                      "styling": "Tailwind CSS v4",
-                      "icons": "lucide-react",
-                      "graph": "@xyflow/react"
-                    },
-                    "state": {
-                      "global": "Zustand",
-                      "validation": "Zod"
-                    },
-                    "data": {
-                      "graph_db": "FalkorDB",
-                      "compute": "Polars (via Tauri Rust bridge)",
-                      "format": "Parquet / JSON"
-                    },
-                    "ai": {
-                      "model": "Gemini",
-                      "mode": "function_calling",
-                      "temperature": 0
-                    },
-                    "test": {
-                      "unit": "Vitest + React Testing Library",
-                      "e2e": "Playwright"
-                    }
-                  }
-        </script>
+    <!-- ============================================================
+         GLOBAL STORE (Zustand)
+         複数のコンテキストをまたいで共有すべき状態のみを定義する。
 
-        <style>
-            :root {
-                --bg: #0b0f19;
-                --panel: #111827;
-                --border: #1f2937;
-                --accent: #3b82f6;
-                --action: #10b981;
-                --warning: #f59e0b;
-                --danger: #ef4444;
-                --text: #f3f4f6;
-                --text-dim: #9ca3af;
-            }
+         設計方針:
+         - FalkorDB = 事実（JPXデータ・銘柄属性）。シミュレーションで変更しない。
+         - シミュレーション結果 = reports/ にファイル出力。Write back なし。
+         - execution.mode が ctx-graph のレンダリングモードを制御する。
+         - operationPolicy で操作の危険度を分類する。
+           read         → 承認不要（自動実行）
+           simulation   → CoT表示 + ユーザー承認
+           fact_write   → 確認ダイアログ必須
+         - Gemini は actionRegistry + pipelineRegistry を tools として参照する。
+    ============================================================ -->
+    <script id="global-store" type="application/json">
+      {
+        "selection": { "id": "1605", "type": "Company", "name": "INPEX" },
+        "execution": { "status": "idle", "mode": "GRAPH" },
+        "operationPolicy": {
+          "read": "auto",
+          "simulation": "requires_approval",
+          "fact_write": "requires_confirmation"
+        },
+        "actionRegistry": {
+          "stress_test": {
+            "when": "外部ショックが特定企業に与える影響を見たい時",
+            "input": ["selection_id", "variable", "delta"],
+            "output": ["impact_score", "affected_nodes"],
+            "executor": "execute_script",
+            "script": "scripts/stress_test.py",
+            "writes_to": "simulation",
+            "policy": "simulation"
+          },
+          "valuation_dcf": {
+            "when": "企業の理論株価を算出したい時",
+            "input": ["selection_id", "discount_rate", "forecast_years"],
+            "output": ["fair_value", "upside_pct"],
+            "executor": "execute_script",
+            "script": "scripts/valuation_dcf.py",
+            "writes_to": "simulation",
+            "policy": "simulation"
+          },
+          "risk_scan": {
+            "when": "ポートフォリオ全体のリスク分布を把握したい時",
+            "input": ["selection_ids", "risk_factors"],
+            "output": ["risk_matrix", "top_exposures"],
+            "executor": "execute_script",
+            "script": "scripts/risk_scan.py",
+            "writes_to": "simulation",
+            "policy": "simulation"
+          },
+          "run_pipeline": {
+            "when": "登録済みの分析パイプラインを実行したい時",
+            "input": ["pipeline_id", "selection_id"],
+            "output": ["report_path"],
+            "executor": "pipeline_runner",
+            "writes_to": "simulation",
+            "policy": "simulation"
+          }
+        },
+        "pipelineRegistry": {
+          "oil_sensitivity": {
+            "label": "原油感応度分析",
+            "description": "原油価格の上下変動が対象企業に与える影響を分析する",
+            "steps": [
+              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": 0.1 } },
+              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": -0.1 } }
+            ],
+            "input": ["selection_id"],
+            "output": "reports/pipeline/"
+          }
+        }
+      }
+    </script>
 
-            body {
-                margin: 0;
-                background: var(--bg);
-                color: var(--text);
-                font-family: 'Segoe UI', system-ui, sans-serif;
-                display: grid;
-                grid-template-columns: 320px 1fr 420px;
-                grid-template-rows: 60px 1fr 260px;
-                height: 100vh;
-                overflow: hidden;
-            }
+    <!-- src/store/useKabutoStore.ts のローカル初期値はグローバルストアが提供する -->
 
-            header {
-                grid-column: 1 / -1;
-                background: var(--panel);
-                border-bottom: 1px solid var(--border);
-                display: flex;
-                align-items: center;
-                padding: 0 20px;
-                justify-content: space-between;
-                z-index: 100;
-            }
+    <!-- ctx-ontology のローカル状態 -->
+    <script data-context="ctx-ontology" class="local-state" type="application/json">
+      {
+        "ingestionState": "idle",
+        "summary": null,
+        "errorMessage": null
+      }
+    </script>
 
-            .context-area {
-                background: var(--panel);
-                border: 1px solid var(--border);
-                margin: 4px;
-                border-radius: 4px;
-                display: flex;
-                flex-direction: column;
-                overflow: hidden;
-                position: relative;
-            }
+    <!-- ctx-graph のローカル状態 -->
+    <script data-context="ctx-graph" class="local-state" type="application/json">
+      {
+        "executionMode": "GRAPH"
+      }
+    </script>
 
-            .area-header {
-                position: sticky;
-                top: 0;
-                z-index: 30;
-                padding: 12px 15px;
-                background: #1f2937;
-                font-size: 0.7rem;
-                font-weight: 900;
-                text-transform: uppercase;
-                color: var(--text-dim);
-                border-bottom: 1px solid var(--border);
-            }
+    <!-- ctx-aip のローカル状態 -->
+    <script data-context="ctx-aip" class="local-state" type="application/json">
+      {
+        "messages": [],
+        "isLoading": false,
+        "pendingApproval": null
+      }
+    </script>
 
-            .scroll-container {
-                flex: 1;
-                overflow-y: auto;
-                padding: 15px;
-            }
+    <!-- ctx-metrics のローカル状態 -->
+    <script data-context="ctx-metrics" class="local-state" type="application/json">
+      {
+        "period": "1Y",
+        "simulationReportPath": null
+      }
+    </script>
 
-            .features {
-                margin: 0;
-                padding: 0;
-                list-style: none;
-            }
+    <!-- ============================================================
+         UI DATA FLOWS（コンテキスト間のデータフロー）
+         node_click       ctx-graph  → global-store: selection.id を更新
+         selection_change global-store → ctx-aip, ctx-metrics: selection を配信
+         cot_generated    ctx-aip    → ctx-graph: execution.mode = COT に切替
+         pipeline_saved   ctx-graph  → pipelineRegistry: パイプライン定義を登録
+         action_executed  ctx-aip    → ctx-metrics: simulationReportPath を渡す
+    ============================================================ -->
 
-            .features li {
-                margin-bottom: 24px;
-                padding: 16px;
-                background: #1e293b50;
-                border-left: 4px solid var(--accent);
-            }
+    <style>
+      :root {
+        --background: #09090b;
+        --card:       #0f1117;
+        --card-border:#1c1f2e;
+        --panel:      #13161f;
+        --muted:      #1e2231;
+        --muted-fg:   #4b5263;
+        --border:     #1e2333;
+        --input:      #1a1d2a;
 
-            .features b {
-                display: block;
-                color: var(--accent);
-                font-family: monospace;
-                margin-bottom: 8px;
-                font-size: 0.95rem;
-            }
+        --fg:         #e8eaf0;
+        --fg-dim:     #6b7280;
+        --fg-subtle:  #374151;
 
-            .features p {
-                margin: 0;
-                font-size: 0.9rem;
-                line-height: 1.6;
-                color: var(--text);
-            }
+        --accent:     #3b82f6;
+        --accent-dim: #1e3a5f;
+        --emerald:    #10b981;
+        --emerald-dim:#064e35;
+        --amber:      #f59e0b;
+        --amber-dim:  #451a00;
+        --red:        #ef4444;
+        --red-dim:    #450a0a;
+        --violet:     #8b5cf6;
+        --violet-dim: #2e1065;
 
-            .cot-box {
-                background: #0f172a;
-                border: 1px solid var(--border);
-                border-radius: 4px;
-                padding: 12px;
-                margin-top: 10px;
-                font-size: 0.85rem;
-            }
+        --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+        --font-sans: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
+        --radius: 4px;
+      }
 
-            .cot-thought {
-                color: var(--text-dim);
-                font-style: italic;
-                margin-bottom: 10px;
-                border-bottom: 1px dotted var(--border);
-                padding-bottom: 8px;
-                line-height: 1.6;
-            }
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; overflow: hidden; }
 
-            .plan-card {
-                border: 1px solid var(--warning);
-                padding: 10px;
-                background: #fbbf2410;
-                margin-bottom: 10px;
-            }
+      body {
+        background: var(--background);
+        color: var(--fg);
+        font-family: var(--font-sans);
+        font-size: 13px;
+        display: grid;
+        grid-template-columns: 300px 1fr 400px;
+        grid-template-rows: 52px 1fr 240px;
+        height: 100vh;
+      }
 
-            .report-preview {
-                background: #000;
-                padding: 8px;
-                font-family: monospace;
-                font-size: 0.75rem;
-                margin-top: 8px;
-                color: var(--action);
-                line-height: 1.6;
-            }
+      header {
+        grid-column: 1 / -1;
+        background: var(--card);
+        border-bottom: 1px solid var(--card-border);
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        gap: 24px;
+        justify-content: space-between;
+        z-index: 50;
+      }
 
-            .btn-group {
-                display: grid;
-                grid-template-columns: 1fr 2fr;
-                gap: 8px;
-                margin-top: 12px;
-            }
+      .header-brand { display: flex; align-items: center; gap: 10px; }
+      .header-logo {
+        font-family: var(--font-mono);
+        font-size: 15px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        color: var(--fg);
+      }
+      .header-logo span { color: var(--accent); }
 
-            .btn {
-                padding: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-size: 0.85rem;
-            }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 2px 8px;
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .badge-green   { background: var(--emerald-dim); color: var(--emerald); border: 1px solid #065f46; }
+      .badge-blue    { background: var(--accent-dim);  color: var(--accent);  border: 1px solid #1e40af; }
+      .badge-amber   { background: var(--amber-dim);   color: var(--amber);   border: 1px solid #78350f; }
+      .badge-red     { background: var(--red-dim);     color: var(--red);     border: 1px solid #7f1d1d; }
+      .badge-muted   { background: var(--muted);       color: var(--fg-dim);  border: 1px solid var(--border); }
+      .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-            .btn-cancel {
-                background: #374151;
-                color: white;
-            }
+      .header-right { display: flex; align-items: center; gap: 12px; }
 
-            .btn-approve {
-                background: var(--action);
-                color: #000;
-            }
-        </style>
-    </head>
+      .selection-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 12px;
+        background: var(--muted);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+      }
+      .selection-chip .ticker { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--accent); }
+      .selection-chip .name   { font-size: 12px; color: var(--fg-dim); }
+      .selection-chip .price  { font-family: var(--font-mono); font-size: 12px; color: var(--emerald); }
 
-    <body>
+      .panel {
+        background: var(--card);
+        border: 1px solid var(--card-border);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        margin: 3px;
+        border-radius: var(--radius);
+      }
 
-        <header>
-            <div style="letter-spacing: 2px; font-weight: bold;">KABUTO // ONTOLOGY</div>
-            <div style="font-family: monospace; color: var(--action); font-size: 0.8rem;">
-                ● DB_POLICY: READ_ONLY_FROM_SIMULATION
+      .panel-header {
+        padding: 8px 14px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-shrink: 0;
+      }
+
+      .panel-title {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.15em;
+        text-transform: uppercase;
+        color: var(--fg-dim);
+      }
+
+      .panel-actions { display: flex; align-items: center; gap: 6px; }
+
+      .panel-body {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        scrollbar-width: thin;
+        scrollbar-color: var(--muted) transparent;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 10px;
+        border-radius: var(--radius);
+        border: 1px solid transparent;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+      .btn-primary { background: var(--accent);    color: #fff; border-color: var(--accent); }
+      .btn-outline { background: transparent;       color: var(--fg-dim); border-color: var(--border); }
+      .btn-ghost   { background: transparent;       color: var(--fg-dim); border: none; }
+      .btn-emerald { background: var(--emerald);    color: #000; font-weight: 700; }
+      .btn-danger  { background: var(--red-dim);    color: var(--red); border-color: var(--red); }
+      .btn-sm      { padding: 3px 7px; font-size: 9px; }
+
+      /* ─── CTX-1: ONTOLOGY EXPLORER ─── */
+      #ctx-ontology { grid-row: 2; }
+
+      .status-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 12px;
+      }
+      .status-label { font-family: var(--font-mono); font-size: 9px; color: var(--fg-dim); letter-spacing: 0.08em; }
+
+      .ingest-card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+      .ingest-card-title {
+        font-family: var(--font-mono);
+        font-size: 10px;
+        font-weight: 700;
+        color: var(--fg);
+        margin-bottom: 4px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .ingest-card p { font-size: 11px; color: var(--fg-dim); line-height: 1.7; margin-bottom: 8px; }
+
+      .stat-row  { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+      .stat-box  { background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px; }
+      .stat-box .val { font-family: var(--font-mono); font-size: 18px; font-weight: 700; color: var(--fg); line-height: 1; }
+      .stat-box .lbl { font-size: 9px; color: var(--fg-dim); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.08em; }
+
+      .confirm-dialog {
+        background: var(--panel);
+        border: 1px solid var(--amber);
+        border-radius: var(--radius);
+        padding: 12px;
+        margin-bottom: 10px;
+      }
+      .confirm-dialog-title {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--amber);
+        font-weight: 700;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+      }
+      .confirm-dialog p { font-size: 11px; color: var(--fg-dim); line-height: 1.6; margin-bottom: 10px; }
+      .confirm-summary { font-family: var(--font-mono); font-size: 11px; color: var(--amber); margin-bottom: 10px; }
+      .confirm-btns { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; }
+
+      .schema-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--border);
+      }
+      .schema-item:last-child { border-bottom: none; }
+      .schema-item .node-label { font-family: var(--font-mono); font-size: 11px; color: var(--violet); }
+      .schema-item .edge-label { font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim); }
+
+      /* ─── CTX-2: GRAPH ─── */
+      #ctx-graph { grid-row: 2; }
+
+      .mode-tabs { display: flex; gap: 2px; }
+      .mode-tab {
+        padding: 3px 10px;
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        cursor: pointer;
+        border: 1px solid transparent;
+        color: var(--fg-dim);
+        background: transparent;
+      }
+      .mode-tab.active { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
+
+      .graph-canvas {
+        flex: 1;
+        position: relative;
+        overflow: hidden;
+        background: radial-gradient(ellipse 80% 60% at 50% 40%, #1e2a4020 0%, transparent 70%), var(--card);
+      }
+      .graph-canvas::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image: radial-gradient(circle, var(--muted-fg) 0.5px, transparent 0.5px);
+        background-size: 28px 28px;
+        opacity: 0.25;
+      }
+      .graph-node {
+        position: absolute;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-mono);
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .node-company { width: 52px; height: 52px; background: var(--accent-dim); border: 2px solid var(--accent); color: var(--accent); font-size: 9px; }
+      .node-company.selected { background: var(--accent); color: #fff; box-shadow: 0 0 20px #3b82f680; }
+      .node-sector  { width: 40px; height: 40px; background: var(--violet-dim); border: 1.5px solid var(--violet); color: var(--violet); font-size: 8px; }
+      .node-index   { width: 34px; height: 34px; background: var(--emerald-dim); border: 1.5px solid var(--emerald); color: var(--emerald); font-size: 8px; }
+      .graph-label  { position: absolute; font-family: var(--font-mono); font-size: 9px; color: var(--fg-dim); pointer-events: none; white-space: nowrap; }
+      .graph-edges  { position: absolute; inset: 0; pointer-events: none; }
+      .graph-zoom-controls { position: absolute; bottom: 12px; right: 12px; display: flex; flex-direction: column; gap: 2px; }
+      .graph-info {
+        position: absolute;
+        top: 10px; left: 10px;
+        background: #0f111780;
+        backdrop-filter: blur(8px);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 10px;
+        font-family: var(--font-mono);
+        font-size: 9px;
+        color: var(--fg-dim);
+        line-height: 1.8;
+      }
+
+      /* ─── CTX-3: AIP / CoT ─── */
+      #ctx-aip { grid-row: 2; }
+
+      .chat-messages { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+      .msg { padding: 10px 12px; border-radius: var(--radius); font-size: 12px; line-height: 1.7; }
+      .msg-user   { background: var(--accent-dim); border: 1px solid #1e40af; color: var(--fg); align-self: flex-end; max-width: 90%; }
+      .msg-gemini { background: var(--panel); border: 1px solid var(--border); color: var(--fg-dim); }
+      .msg-label  { font-family: var(--font-mono); font-size: 9px; font-weight: 700; letter-spacing: 0.1em; margin-bottom: 5px; text-transform: uppercase; }
+      .msg-user .msg-label   { color: var(--accent); }
+      .msg-gemini .msg-label { color: var(--fg-dim); }
+
+      .cot-thought {
+        background: var(--muted);
+        border-left: 3px solid var(--violet);
+        padding: 8px 10px;
+        font-size: 11px;
+        color: var(--fg-dim);
+        font-style: italic;
+        line-height: 1.7;
+        border-radius: 0 var(--radius) var(--radius) 0;
+        margin-bottom: 8px;
+      }
+
+      .plan-card { background: #fbbf2408; border: 1px solid var(--amber); border-radius: var(--radius); padding: 10px; margin-bottom: 8px; }
+      .plan-card-header { font-family: var(--font-mono); font-size: 9px; font-weight: 700; color: var(--amber); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 6px; }
+      .plan-code { font-family: var(--font-mono); font-size: 10px; line-height: 1.9; color: var(--fg); }
+      .plan-code .key  { color: var(--fg-dim); }
+      .plan-code .val  { color: var(--emerald); }
+      .plan-code .step { color: var(--accent); }
+      .report-line { font-family: var(--font-mono); font-size: 10px; color: var(--emerald); background: #000; padding: 6px 8px; border-radius: var(--radius); margin-top: 6px; line-height: 1.6; }
+
+      .approval-btns { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin-top: 10px; }
+
+      .chat-input-row {
+        display: flex;
+        gap: 6px;
+        padding: 10px 12px;
+        background: var(--panel);
+        border-top: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+      .chat-input {
+        flex: 1;
+        background: var(--input);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 6px 10px;
+        font-family: var(--font-sans);
+        font-size: 12px;
+        color: var(--fg);
+        outline: none;
+      }
+      .chat-input::placeholder { color: var(--fg-subtle); }
+      .chat-input:focus { border-color: var(--accent); }
+
+      /* ─── CTX-4: METRICS ─── */
+      #ctx-metrics { grid-column: 1 / -1; grid-row: 3; flex-direction: row; }
+
+      .metrics-section { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); overflow: hidden; }
+      .metrics-section:last-child { border-right: none; }
+      .chart-area { flex: 1; position: relative; padding: 8px 12px; overflow: hidden; }
+      .chart-svg  { width: 100%; height: 100%; overflow: visible; }
+
+      .kpi-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; padding: 8px 12px; flex-shrink: 0; border-top: 1px solid var(--border); }
+      .kpi { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; }
+      .kpi-val { font-family: var(--font-mono); font-size: 14px; font-weight: 700; line-height: 1; margin-bottom: 2px; }
+      .kpi-lbl { font-size: 9px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.07em; }
+      .up  { color: var(--emerald); }
+      .down{ color: var(--red); }
+      .neu { color: var(--fg); }
+
+      /* ─── Scrollbar / Misc ─── */
+      ::-webkit-scrollbar { width: 4px; height: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: var(--muted); border-radius: 2px; }
+      .sep { width: 1px; height: 20px; background: var(--border); }
+    </style>
+  </head>
+
+  <body>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         HEADER
+         src/components/Topbar.tsx
+         describe: アプリの状態を確認する
+           [ ] ロゴ「KABU<TO>」とバージョンバッジが表示される
+           [ ] FalkorDB 接続状態バッジが表示される
+           [ ] 選択中の銘柄チップ（ticker / 社名 / 株価）が表示される
+           [ ] execution.mode バッジが表示される
+           [ ] Gemini ステータスバッジが表示される
+    ════════════════════════════════════════════════════════════════ -->
+    <header>
+      <div class="header-brand">
+        <div class="header-logo">KABU<span>TO</span></div>
+        <div class="sep"></div>
+        <span class="badge badge-muted">v0.1.0</span>
+        <span class="badge badge-green"><span class="dot"></span>FalkorDB</span>
+        <span class="badge badge-muted">READ_ONLY_FROM_SIMULATION</span>
+      </div>
+      <div class="header-right">
+        <div class="selection-chip">
+          <span class="ticker">1605</span>
+          <span class="name">INPEX CORPORATION</span>
+          <span class="price">▲ 2,341.0 +1.23%</span>
+        </div>
+        <span class="badge badge-blue">GRAPH MODE</span>
+        <span class="badge badge-muted">Gemini · idle</span>
+      </div>
+    </header>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         CTX-1: ONTOLOGY EXPLORER
+         責務: FalkorDB へのデータ投入・スキーマ管理（事実の管理）
+         DB アクセス: Write（手動トリガーのみ・fact_write 承認必須）
+         operationPolicy: fact_write → requires_confirmation
+
+         src/components/OntologyPanel.tsx
+         describe: データを投入・スキーマを確認する
+           [ ] idle 状態のとき「手動更新」ボタンと Graph Schema が表示される
+           [ ] 「手動更新」ボタンをクリックすると loading_master 状態になる
+           [ ] ローディング中はスピナーが表示される
+           [ ] バリデーション完了後に confirming_write 状態になりサマリーが表示される
+           [ ] 「確認して書き込み」をクリックすると writing 状態になる
+           [ ] 書き込み完了後 done 状態になり onIngestionComplete が呼ばれる
+           [ ] 「キャンセル」をクリックすると idle に戻る
+           [ ] error 状態のとき「リトライ」ボタンとエラーメッセージが表示される
+           [ ] 「リトライ」をクリックすると idle に戻る
+
+         src/hooks/useIngestion.ts
+         describe: JPXマスターデータ投入フローを管理する
+           [ ] 初期状態は idle である
+           [ ] startIngestion() を呼ぶと loading_master → validating → confirming_write と遷移する
+           [ ] startIngestion() 中に例外が発生すると error 状態になり onIngestionError が呼ばれる
+           [ ] confirmWrite() を呼ぶと writing → done と遷移し onIngestionComplete が呼ばれる
+           [ ] confirmWrite() 中に例外が発生すると error 状態になり onIngestionError が呼ばれる
+           [ ] cancelWrite() を呼ぶと idle に戻る
+           [ ] retry() を呼ぶと idle に戻る
+    ════════════════════════════════════════════════════════════════ -->
+    <nav id="ctx-ontology" class="panel">
+      <div class="panel-header">
+        <span class="panel-title">01 · Ontology Explorer</span>
+        <div class="panel-actions">
+          <span class="badge badge-amber">fact_write</span>
+          <button class="btn btn-outline btn-sm">↻ 手動更新</button>
+        </div>
+      </div>
+      <div class="panel-body">
+
+        <!-- idle 状態 -->
+        <div class="status-row">
+          <span class="status-label">STATE</span>
+          <span class="badge badge-green"><span class="dot"></span>idle</span>
+          <span class="status-label" style="margin-left:8px;">LAST UPDATE</span>
+          <span style="font-family:var(--font-mono);font-size:10px;color:var(--fg-dim);">2025-04-28</span>
+        </div>
+
+        <!-- Graph Schema（idle / done 状態で表示） -->
+        <div class="ingest-card">
+          <div class="ingest-card-title">Graph Schema</div>
+          <div class="schema-item">
+            <span class="node-label">Company</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span class="badge badge-muted">3,935 nodes</span>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--fg-dim);">4 props</span>
             </div>
-        </header>
-
-        <!-- ============================================================
-             CTX-1: ONTOLOGY EXPLORER
-             責務: FalkorDB へのデータ投入・スキーマ定義（事実の管理）
-             DB アクセス: Write（手動トリガーのみ・fact_write承認必須）
-             注意: シミュレーション・パイプラインからは Write しない
-        ============================================================ -->
-        <nav id="ctx-ontology" class="context-area">
-            <div class="area-header">1. Ontology Explorer</div>
-            <div class="scroll-container">
-                <ul class="features">
-                    <li>
-                        <b>[Feature] JPX Data Ingestion</b>
-                        <p>JPX公式サイトから最新の銘柄一覧CSVを取得。FalkorDB上で一意性を担保しつつ、全上場企業をノードとしてMERGEする。operationPolicy: fact_write
-                            のため確認ダイアログ必須。</p>
-                    </li>
-                    <li>
-                        <b>[Feature] Object Mapping</b>
-                        <p>各銘柄ノードに対し、ローカルのWindowsパス上のParquet（株価履歴）およびXBRL（財務報告書）の絶対パスをURIプロパティとして紐付ける。</p>
-                    </li>
-                    <li>
-                        <b>[Feature] Metadata Schema</b>
-                        <p>33業種区分・市場区分・時価総額ランクなどの属性をオントロジープロパティとして定義。Geminiが引数を選ぶ際の制約（選択肢）となる。</p>
-                    </li>
-                    <li>
-                        <b>[Logic] Manual Ingest Trigger</b>
-                        <p>ユーザーによる手動更新ボタン押下時のみ実行。差分データのみを効率的に更新する。</p>
-                    </li>
-                </ul>
+          </div>
+          <div class="schema-item">
+            <span class="node-label">Sector</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span class="badge badge-muted">33 nodes</span>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--fg-dim);">2 props</span>
             </div>
-        </nav>
-
-        <!-- ============================================================
-             CTX-2: CAUSAL GRAPH / PIPELINE BUILDER
-             責務: FalkorDB の可視化・selection 更新・実行計画可視化・パイプライン構築
-             DB アクセス: Read only（Cypher Query）
-             モード（execution.mode で切り替え）:
-               GRAPH    → 通常の因果グラフ（FalkorDBから描画）
-               COT      → Geminiの実行計画フロー（CoTグラフ）
-               PIPELINE → パイプライン構築GUI
-                          actionRegistry のノードをドラッグ&ドロップで接続
-                          完成したパイプラインを pipelineRegistry に登録
-             データフロー:
-               node_click    → global-store.selection を更新
-               cot_generated → ctx-aip から COT モードへの切替を受信
-               pipeline_saved → 構築したパイプラインを pipelineRegistry へ保存
-        ============================================================ -->
-        <main id="ctx-graph" class="context-area">
-            <div class="area-header">2. Causal Graph / Pipeline Builder (React Flow Canvas)</div>
-            <div class="scroll-container">
-                <ul class="features">
-                    <li>
-                        <b>[Feature] Dynamic Graph Rendering (GRAPHモード)</b>
-                        <p>FalkorDBへのCypherクエリ結果（Nodes/Edges）をReact FlowのJSON形式に動的変換し描画する。ノードクリックでselection.idを更新する。</p>
-                    </li>
-                    <li>
-                        <b>[Feature] Edge Weighted Visualization (GRAPHモード)</b>
-                        <p>因果関係の強さや相関係数に基づき、エッジの太さ・透過度を動的に変更し影響力を視覚化する。</p>
-                    </li>
-                    <li>
-                        <b>[Logic] Semantic Zoom & Detail (GRAPHモード)</b>
-                        <p>ズームレベルに応じて表示情報を切り替え。縮小時は名称のみ、拡大時はPolarsで計算したリアルタイム数値を表示する。</p>
-                    </li>
-                    <li>
-                        <b>[Logic] Graph Layout Strategy (GRAPHモード)</b>
-                        <p>D3-forceやDagreを活用し、数千ノードを重なりなく自動配置する。</p>
-                    </li>
-                    <li>
-                        <b>[Logic] CoT Flow Rendering (COTモード)</b>
-                        <p>ctx-aipからexecution.mode: COTを受け取ったとき、Geminiの実行計画をReact
-                            Flowのノード・エッジとしてキャンバスに描画する。因果グラフとは切り替えて表示する。</p>
-                    </li>
-                    <li>
-                        <b>[Feature] Pipeline Builder (PIPELINEモード)</b>
-                        <p>actionRegistryの各actionをノードとしてパレットに表示。ドラッグ&ドロップでキャンバスに配置し、エッジで繋ぐことで分析フローを構築する。入力パラメータ（selection_id等）はノード上で設定する。完成したパイプラインに名前・説明を付けてpipelineRegistryに登録する。
-                        </p>
-                    </li>
-                    <li>
-                        <b>[Logic] Graph Mode Switching</b>
-                        <p>execution.modeに応じてキャンバスの内容を切り替える。GRAPH / COT / PIPELINEの3モードをヘッダーのタブで切り替え可能。</p>
-                    </li>
-                </ul>
+          </div>
+          <div class="schema-item">
+            <span class="node-label">Market</span>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <span class="badge badge-muted">3 nodes</span>
+              <span style="font-family:var(--font-mono);font-size:10px;color:var(--fg-dim);">1 props</span>
             </div>
-        </main>
+          </div>
+          <div class="schema-item">
+            <span class="edge-label">BELONGS_TO</span>
+            <span class="badge badge-muted">3,935 edges</span>
+          </div>
+        </div>
 
-        <!-- ============================================================
-             CTX-3: AIP LOGIC / CoT DEBUGGER
-             責務: Gemini Function Calling・CoT表示・実行・レポート出力
-             DB アクセス: なし（シミュレーション結果はレポートファイルへ）
-             Gemini が参照する tools:
-               - actionRegistry（単発アクション）
-               - pipelineRegistry（登録済みパイプライン） ← run_pipeline経由
-             データフロー:
-               1. global-store.selection を受け取り Gemini へ送信
-               2. Gemini の CoT(text) + functionCall を表示
-               3. ctx-graph に COT モードへの切替を指示
-               4. 承認後に Tauri Bridge 経由で execute_script を呼び出す
-               5. 結果を reports/ にファイル出力
-               6. レポートパスを ctx-metrics へ送信
-             実装方針:
-               - execute_script(script, args: JSON) でリビルド不要
-               - 引数は FalkorDB のオントロジーから制約（推測しない）
-               - FalkorDB への Write back は一切しない
-               - operationPolicy に従い承認レベルを自動判定
-        ============================================================ -->
-        <aside id="ctx-aip" class="context-area">
-            <div class="area-header">3. AIP Logic / CoT Debugger</div>
-            <div class="scroll-container">
-                <ul class="features">
-                    <li>
-                        <b>[Feature] Gemini Function Calling</b>
-                        <p>selectionの型・actionRegistryの"when"・pipelineRegistryのlabelを元に、Geminiが最適な関数またはパイプラインを選択する。引数はFalkorDBのオントロジーから取得し推測に頼らない。temperature=0で決定論的に動作させる。
-                        </p>
-                    </li>
-                    <li>
-                        <b>[Feature] CoT Visualization → Graph Mode</b>
-                        <p>Geminiのtext（思考過程）とfunctionCall（実行計画）を分離して表示。同時にctx-graphをCOTモードに切り替え、実行計画をReact
-                            Flowグラフとして可視化する。</p>
-                    </li>
-                    <li>
-                        <b>[Feature] Approval Gate（承認ゲート）</b>
-                        <p>operationPolicyに従い承認レベルを自動判定。simulation: CoT表示後に承認ボタン。fact_write:
-                            確認ダイアログ。承認後にexecute_scriptを呼び出す。FalkorDBへの変更は一切しない。</p>
-                    </li>
-                    <li>
-                        <b>[Logic] execute_script Bridge</b>
-                        <p>Tauri側はexecute_script(script: String, args:
-                            JSON)のみを持つ汎用コマンド。新しいアクションの追加はスクリプトファイルを置くだけでリビルド不要。パイプラインはstepsを順次実行する。</p>
-                    </li>
-                    <li>
-                        <b>[Feature] Simulation Report Output</b>
-                        <p>実行結果をreports/ディレクトリにJSONファイルとして出力。パイプライン実行時はreports/pipeline/に保存。FalkorDB（事実）とシミュレーション（仮説）を明確に分離する。
-                        </p>
-                    </li>
-                    <li>
-                        <b>[Feature] Narrative Generation</b>
-                        <p>実行結果をGeminiが自然言語で要約。因果関係のパスを辿り「なぜこの数値になったか」のストーリーを生成する。</p>
-                    </li>
-                </ul>
+        <!-- confirming_write 状態のモックアップ -->
+        <div class="confirm-dialog">
+          <div class="confirm-dialog-title">⚠ fact_write · 確認必須</div>
+          <p>JPX CSV からデータをインポートし FalkorDB に書き込みます。この操作は取り消せません。</p>
+          <div class="confirm-summary">3,935 companies · 33 sectors · 3 markets</div>
+          <div class="confirm-btns">
+            <button class="btn btn-outline">キャンセル</button>
+            <button class="btn btn-emerald">確認して書き込み</button>
+          </div>
+        </div>
 
-                <!-- CoT Debugger UI のモックアップ（パイプライン実行時） -->
-                <div class="cot-box">
-                    <div
-                        style="font-size:0.7rem; font-weight:900; color:var(--text-dim); margin-bottom:10px; text-transform:uppercase;">
-                        Gemini Chain of Thought
-                    </div>
-                    <div class="cot-thought">
-                        "INPEX(1605)の原油感応度を分析します。登録済みパイプライン「oil_sensitivity」が適切です。stress_test(+10%)とstress_test(-10%)を順次実行し、結果をレポートとして出力します。"
-                    </div>
-
-                    <div class="plan-card">
-                        <div style="font-size:0.7rem; font-weight:bold; color:var(--warning);">
-                            PROPOSED PIPELINE EXECUTION
-                        </div>
-                        <div style="font-family:monospace; font-size:0.8rem; margin-top:5px; line-height:1.8;">
-                            pipeline: oil_sensitivity<br>
-                            input: { "selection_id": "1605" }<br>
-                            steps:<br>
-                            &nbsp;&nbsp;1. stress_test(crude_oil, +10%)<br>
-                            &nbsp;&nbsp;2. stress_test(crude_oil, -10%)
-                        </div>
-                        <div class="report-preview">
-                            # SIMULATION OUTPUT (FalkorDB は変更しない)<br>
-                            → reports/pipeline/oil_sensitivity_1605_20240426.json
-                        </div>
-                    </div>
-
-                    <div class="btn-group">
-                        <button class="btn btn-cancel">キャンセル</button>
-                        <button class="btn btn-approve">承認して実行</button>
-                    </div>
-                </div>
+        <!-- Object Mapping（idle / done 状態で表示） -->
+        <div class="ingest-card">
+          <div class="ingest-card-title">Object Mapping</div>
+          <p>Parquet（株価履歴）/ XBRL（財務）の絶対パスを URI プロパティとして紐付け</p>
+          <div class="stat-row">
+            <div class="stat-box">
+              <div class="val" style="color:var(--emerald);">3,812</div>
+              <div class="lbl">Parquet linked</div>
             </div>
-        </aside>
-
-        <!-- ============================================================
-             CTX-4: METRICS ENGINE
-             責務: Polars による計算・チャート描画・レポート読み込み
-             DB アクセス: Read only（Parquet）
-             トリガー:
-               - selection_change: 選択銘柄の時系列データをロード
-               - simulation_report_path: レポートファイルを読み込み
-                                         シミュレーション結果を予測エッジとして合成
-        ============================================================ -->
-        <footer id="ctx-metrics" class="context-area" style="grid-column: 1 / -1;">
-            <div class="area-header">4. Metrics Engine (Polars / Parquet)</div>
-            <div style="display:flex; height: 100%; overflow: hidden;">
-                <div class="scroll-container" style="flex:1; border-right: 1px solid var(--border);">
-                    <ul class="features">
-                        <li>
-                            <b>[Feature] Sub-second Metric Calculation</b>
-                            <p>Polars-rsを活用し、巨大な株価Parquetファイルから特定期間の騰落率や財務KPIをサブ秒で抽出・チャート描画する。</p>
-                        </li>
-                        <li>
-                            <b>[Feature] Cross-Object Correlation</b>
-                            <p>グラフで選択した複数ノードの時系列データを同期ロード。銘柄間・指標間の相関をリアルタイムで算出・表示する。</p>
-                        </li>
-                    </ul>
-                </div>
-                <div class="scroll-container" style="flex:1;">
-                    <ul class="features">
-                        <li>
-                            <b>[Feature] Simulation Report Viewer</b>
-                            <p>ctx-aipが出力したレポートファイル（reports/**/*.json）を読み込み、シミュレーション・パイプライン実行結果を既存の時系列チャートに予測エッジ（別色）として合成表示する。過去レポートの読み込みも可能。
-                            </p>
-                        </li>
-                        <li>
-                            <b>[Logic] Intelligent Caching</b>
-                            <p>一度読み込んだParquetの計算結果をメモリ上に保持。同一セッション内での高速な再描画とUI応答性を保証する。</p>
-                        </li>
-                    </ul>
-                </div>
+            <div class="stat-box">
+              <div class="val" style="color:var(--accent);">2,104</div>
+              <div class="lbl">XBRL linked</div>
             </div>
-        </footer>
+          </div>
+        </div>
 
-    </body>
+      </div>
+    </nav>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         CTX-2: CAUSAL GRAPH / PIPELINE BUILDER
+         責務: FalkorDB の可視化・selection 更新・CoT グラフ・パイプライン構築
+         DB アクセス: Read only（Cypher Query）
+         モード（execution.mode）:
+           GRAPH    → FalkorDB から取得した因果グラフを描画
+           COT      → Gemini の実行計画フローをグラフ化
+           PIPELINE → actionRegistry のノードをドラッグ&ドロップで接続し
+                      完成したパイプラインを pipelineRegistry に登録
+
+         src/components/CausalGraph.tsx
+         describe: 因果グラフを閲覧・操作する
+           [ ] グラフキャンバスにノードとエッジが描画される
+           [ ] ノードをクリックすると onNodeClick が呼ばれる
+           [ ] GRAPH / COT / PIPELINE タブが表示され切り替えられる
+           [ ] COT モードのとき CoT フローグラフが表示される
+           [ ] PIPELINE モードのとき Pipeline Builder キャンバスが表示される
+           [ ] パイプラインを保存すると onPipelineSave が呼ばれる
+
+         src/hooks/useGraph.ts
+         describe: グラフデータを取得・変換する
+           [ ] FalkorDB からノード・エッジを取得しリアクトフロー形式に変換する
+           [ ] execution.mode が変わるとグラフデータを切り替える
+           [ ] ノードクリックで selection を更新する
+    ════════════════════════════════════════════════════════════════ -->
+    <main id="ctx-graph" class="panel">
+      <div class="panel-header">
+        <span class="panel-title">02 · Causal Graph / Pipeline Builder</span>
+        <div class="panel-actions">
+          <div class="mode-tabs">
+            <button class="mode-tab active">GRAPH</button>
+            <button class="mode-tab">COT</button>
+            <button class="mode-tab">PIPELINE</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="graph-canvas">
+        <div class="graph-info">
+          NODES 42 · EDGES 87 · DEPTH 3<br>
+          LAYOUT dagre · ZOOM 0.8x
+        </div>
+
+        <svg class="graph-edges" viewBox="0 0 700 400" preserveAspectRatio="none">
+          <defs>
+            <marker id="arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L6,3 z" fill="#3b82f640" />
+            </marker>
+          </defs>
+          <line x1="160" y1="180" x2="340" y2="110" stroke="#3b82f630" stroke-width="1.5" marker-end="url(#arrow)" />
+          <line x1="260" y1="220" x2="340" y2="110" stroke="#3b82f620" stroke-width="1" />
+          <line x1="200" y1="300" x2="340" y2="110" stroke="#3b82f615" stroke-width="1" />
+          <line x1="420" y1="200" x2="340" y2="110" stroke="#3b82f620" stroke-width="1" />
+          <line x1="500" y1="260" x2="340" y2="110" stroke="#3b82f615" stroke-width="1" />
+          <line x1="340" y1="110" x2="580" y2="150" stroke="#8b5cf630" stroke-width="1.5" marker-end="url(#arrow)" />
+          <!-- シミュレーションエッジ（破線） -->
+          <line x1="160" y1="180" x2="260" y2="220" stroke="#10b98140" stroke-width="1" stroke-dasharray="4 3" />
+          <line x1="260" y1="220" x2="200" y2="300" stroke="#10b98130" stroke-width="1" stroke-dasharray="4 3" />
+        </svg>
+
+        <div class="graph-node node-company selected" style="left:130px;top:155px;"><span>1605</span></div>
+        <div class="graph-label" style="left:108px;top:213px;">INPEX</div>
+
+        <div class="graph-node node-company" style="left:232px;top:198px;"><span>5020</span></div>
+        <div class="graph-label" style="left:222px;top:250px;font-size:8px;">ENEOS</div>
+
+        <div class="graph-node node-company" style="left:172px;top:276px;"><span>1662</span></div>
+        <div class="graph-label" style="left:158px;top:330px;font-size:8px;">石油資源</div>
+
+        <div class="graph-node node-company" style="left:390px;top:176px;"><span>9101</span></div>
+        <div class="graph-label" style="left:378px;top:230px;font-size:8px;">郵船</div>
+
+        <div class="graph-node node-company" style="left:472px;top:236px;"><span>6758</span></div>
+        <div class="graph-label" style="left:458px;top:290px;font-size:8px;">SONYグループ</div>
+
+        <div class="graph-node node-sector" style="left:320px;top:90px;"><span>ENE</span></div>
+        <div class="graph-label" style="left:304px;top:136px;">Energy</div>
+
+        <div class="graph-node node-index" style="left:563px;top:133px;"><span>N225</span></div>
+        <div class="graph-label" style="left:550px;top:172px;">日経225</div>
+
+        <div class="graph-zoom-controls">
+          <button class="btn btn-outline btn-sm">+</button>
+          <button class="btn btn-outline btn-sm">−</button>
+          <button class="btn btn-outline btn-sm">⊡</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         CTX-3: AIP LOGIC / CoT DEBUGGER
+         責務: Gemini Function Calling・CoT 表示・実行・レポート出力
+         DB アクセス: なし（シミュレーション結果は reports/ へ）
+         Gemini tools: actionRegistry + pipelineRegistry（run_pipeline 経由）
+         データフロー:
+           1. global-store.selection を受け取り Gemini へ送信
+           2. Gemini の CoT(text) + functionCall を表示
+           3. ctx-graph に execution.mode = COT への切替を指示
+           4. 承認後に Tauri Bridge 経由で execute_script を呼び出す
+           5. 結果を reports/ にファイル出力
+           6. レポートパスを ctx-metrics へ送信
+
+         src/components/AIPPanel.tsx
+         describe: Gemini に分析を依頼し結果を確認する
+           [ ] チャット入力欄とメッセージ一覧が表示される
+           [ ] ユーザーメッセージを送信できる
+           [ ] Gemini の CoT（思考過程）が紫のボーダーで表示される
+           [ ] simulation ポリシーの提案に「承認して実行」「キャンセル」ボタンが表示される
+           [ ] 「承認して実行」をクリックすると onApprove が呼ばれる
+           [ ] 「キャンセル」をクリックすると onCancel が呼ばれる
+           [ ] fact_write ポリシーのとき確認ダイアログが表示される
+
+         src/hooks/useAIP.ts
+         describe: Gemini Function Calling を管理する
+           [ ] sendMessage() でメッセージを追加し Gemini を呼び出す
+           [ ] Gemini のレスポンスから CoT テキストと functionCall を分離する
+           [ ] approve() で execute_script を呼び出しレポートを生成する
+           [ ] approve() 後に onReportGenerated(reportPath) が呼ばれる
+           [ ] cancel() で pendingApproval を null にする
+    ════════════════════════════════════════════════════════════════ -->
+    <aside id="ctx-aip" class="panel">
+      <div class="panel-header">
+        <span class="panel-title">03 · AIP Logic / CoT Debugger</span>
+        <div class="panel-actions">
+          <span class="badge badge-amber">simulation · 承認待ち</span>
+        </div>
+      </div>
+      <div class="panel-body">
+        <div class="chat-messages">
+
+          <div class="msg msg-user">
+            <div class="msg-label">USER</div>
+            INPEX(1605)の原油価格感応度を分析してください
+          </div>
+
+          <div class="msg msg-gemini">
+            <div class="msg-label">GEMINI · function_calling · T=0</div>
+            <div class="cot-thought">
+              "INPEX(1605)の原油感応度を分析します。登録済みパイプライン「oil_sensitivity」が最適です。
+              stress_test(+10%) と stress_test(-10%) を順次実行し、結果をレポートとして出力します。"
+            </div>
+            <div class="plan-card">
+              <div class="plan-card-header">📋 Proposed Pipeline Execution</div>
+              <div class="plan-code">
+                <span class="key">pipeline: </span><span class="val">oil_sensitivity</span><br>
+                <span class="key">input: </span><span class="val">{ selection_id: "1605" }</span><br>
+                <span class="key">steps:</span><br>
+                <span class="step">&nbsp;&nbsp;1. </span><span class="val">stress_test</span>(crude_oil, <span class="val">+10%</span>)<br>
+                <span class="step">&nbsp;&nbsp;2. </span><span class="val">stress_test</span>(crude_oil, <span class="val">-10%</span>)
+              </div>
+              <div class="report-line">
+                # SIMULATION OUTPUT（FalkorDB は変更しない）<br>
+                → reports/pipeline/oil_sensitivity_1605_20250428.json
+              </div>
+            </div>
+            <div class="approval-btns">
+              <button class="btn btn-danger">キャンセル</button>
+              <button class="btn btn-emerald">承認して実行</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div class="chat-input-row">
+        <input class="chat-input" type="text" placeholder="銘柄・分析内容を入力… (1605, 原油感応度)" />
+        <button class="btn btn-primary">→</button>
+      </div>
+    </aside>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         CTX-4: METRICS ENGINE
+         責務: Polars による計算・チャート描画・シミュレーションレポート表示
+         DB アクセス: Read only（Parquet）
+         トリガー:
+           selection_change    → 選択銘柄の時系列データをロード
+           simulationReportPath → レポートファイルを読み込み予測エッジを合成
+
+         src/components/MetricsPanel.tsx
+         describe: 銘柄の指標・チャートを確認する
+           [ ] 選択銘柄のローソク足チャートが表示される
+           [ ] KPI（現在値・前日比・高値・安値・出来高・時価総額）が表示される
+           [ ] 期間ボタン（1W・1M・1Y・5Y）で onPeriodChange が呼ばれる
+           [ ] simulationReportPath が渡されると予測ライン（破線）が合成表示される
+
+         src/hooks/useMetrics.ts
+         describe: 銘柄の時系列データを取得・計算する
+           [ ] selection が変わると Polars 経由で時系列データをロードする
+           [ ] period が変わるとデータ範囲を絞り込む
+           [ ] simulationReportPath が渡されるとレポートを読み込み予測データを返す
+           [ ] 一度ロードしたデータはセッション内でキャッシュされる
+    ════════════════════════════════════════════════════════════════ -->
+    <footer id="ctx-metrics" class="panel" style="flex-direction:row;">
+
+      <div class="metrics-section">
+        <div class="panel-header">
+          <span class="panel-title">Price · 1605 INPEX</span>
+          <div class="panel-actions">
+            <button class="btn btn-ghost btn-sm">1W</button>
+            <button class="btn btn-ghost btn-sm">1M</button>
+            <button class="btn btn-outline btn-sm">1Y</button>
+            <button class="btn btn-ghost btn-sm">5Y</button>
+          </div>
+        </div>
+        <div class="chart-area">
+          <svg class="chart-svg" viewBox="0 0 780 90" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%"   stop-color="#3b82f6" stop-opacity="0.35" />
+                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <!-- 出来高バー -->
+            <rect x="0"   y="76" width="18" height="12" fill="url(#volGrad)" />
+            <rect x="26"  y="70" width="18" height="18" fill="url(#volGrad)" />
+            <rect x="52"  y="78" width="18" height="10" fill="url(#volGrad)" />
+            <rect x="78"  y="73" width="18" height="15" fill="url(#volGrad)" />
+            <rect x="104" y="68" width="18" height="20" fill="url(#volGrad)" />
+            <rect x="130" y="74" width="18" height="14" fill="url(#volGrad)" />
+            <rect x="156" y="66" width="18" height="22" fill="url(#volGrad)" />
+            <rect x="182" y="72" width="18" height="16" fill="url(#volGrad)" />
+            <rect x="208" y="80" width="18" height="8"  fill="url(#volGrad)" />
+            <rect x="234" y="64" width="18" height="24" fill="url(#volGrad)" />
+            <rect x="260" y="70" width="18" height="18" fill="url(#volGrad)" />
+            <rect x="286" y="76" width="18" height="12" fill="url(#volGrad)" />
+            <rect x="312" y="60" width="18" height="28" fill="url(#volGrad)" />
+            <rect x="338" y="74" width="18" height="14" fill="url(#volGrad)" />
+            <rect x="364" y="68" width="18" height="20" fill="url(#volGrad)" />
+            <rect x="390" y="62" width="18" height="26" fill="url(#volGrad)" />
+            <rect x="416" y="76" width="18" height="12" fill="url(#volGrad)" />
+            <rect x="442" y="58" width="18" height="30" fill="url(#volGrad)" />
+            <rect x="468" y="72" width="18" height="16" fill="url(#volGrad)" />
+            <rect x="494" y="54" width="18" height="34" fill="url(#volGrad)" />
+            <rect x="520" y="66" width="18" height="22" fill="url(#volGrad)" />
+            <rect x="546" y="56" width="18" height="32" fill="url(#volGrad)" />
+            <rect x="572" y="62" width="18" height="26" fill="url(#volGrad)" />
+            <rect x="598" y="48" width="18" height="40" fill="url(#volGrad)" />
+            <rect x="624" y="60" width="18" height="28" fill="url(#volGrad)" />
+            <rect x="650" y="44" width="18" height="44" fill="url(#volGrad)" />
+            <rect x="676" y="52" width="18" height="36" fill="url(#volGrad)" />
+            <rect x="702" y="40" width="18" height="48" fill="url(#volGrad)" />
+            <rect x="728" y="48" width="18" height="40" fill="url(#volGrad)" />
+            <rect x="754" y="36" width="18" height="52" fill="url(#volGrad)" />
+            <!-- ローソク足（陽=emerald / 陰=red） -->
+            <line x1="9"   y1="46" x2="9"   y2="62" stroke="#4b5563" stroke-width="1" /><rect x="3"   y="50" width="12" height="6"  fill="#10b981" />
+            <line x1="35"  y1="38" x2="35"  y2="58" stroke="#4b5563" stroke-width="1" /><rect x="29"  y="38" width="12" height="10" fill="#ef4444" />
+            <line x1="61"  y1="42" x2="61"  y2="60" stroke="#4b5563" stroke-width="1" /><rect x="55"  y="44" width="12" height="8"  fill="#10b981" />
+            <line x1="87"  y1="34" x2="87"  y2="55" stroke="#4b5563" stroke-width="1" /><rect x="81"  y="38" width="12" height="10" fill="#10b981" />
+            <line x1="113" y1="30" x2="113" y2="50" stroke="#4b5563" stroke-width="1" /><rect x="107" y="30" width="12" height="8"  fill="#ef4444" />
+            <line x1="139" y1="32" x2="139" y2="52" stroke="#4b5563" stroke-width="1" /><rect x="133" y="36" width="12" height="10" fill="#10b981" />
+            <line x1="165" y1="24" x2="165" y2="46" stroke="#4b5563" stroke-width="1" /><rect x="159" y="26" width="12" height="12" fill="#10b981" />
+            <line x1="191" y1="26" x2="191" y2="48" stroke="#4b5563" stroke-width="1" /><rect x="185" y="28" width="12" height="8"  fill="#ef4444" />
+            <line x1="217" y1="30" x2="217" y2="50" stroke="#4b5563" stroke-width="1" /><rect x="211" y="32" width="12" height="10" fill="#10b981" />
+            <line x1="243" y1="18" x2="243" y2="42" stroke="#4b5563" stroke-width="1" /><rect x="237" y="20" width="12" height="14" fill="#10b981" />
+            <line x1="269" y1="20" x2="269" y2="40" stroke="#4b5563" stroke-width="1" /><rect x="263" y="22" width="12" height="8"  fill="#ef4444" />
+            <line x1="295" y1="22" x2="295" y2="44" stroke="#4b5563" stroke-width="1" /><rect x="289" y="24" width="12" height="10" fill="#10b981" />
+            <line x1="321" y1="12" x2="321" y2="38" stroke="#4b5563" stroke-width="1" /><rect x="315" y="14" width="12" height="14" fill="#10b981" />
+            <line x1="347" y1="16" x2="347" y2="38" stroke="#4b5563" stroke-width="1" /><rect x="341" y="18" width="12" height="10" fill="#ef4444" />
+            <line x1="373" y1="14" x2="373" y2="36" stroke="#4b5563" stroke-width="1" /><rect x="367" y="16" width="12" height="12" fill="#10b981" />
+            <line x1="399" y1="6"  x2="399" y2="32" stroke="#4b5563" stroke-width="1" /><rect x="393" y="8"  width="12" height="14" fill="#10b981" />
+            <line x1="425" y1="10" x2="425" y2="34" stroke="#4b5563" stroke-width="1" /><rect x="419" y="12" width="12" height="10" fill="#ef4444" />
+            <line x1="451" y1="4"  x2="451" y2="28" stroke="#4b5563" stroke-width="1" /><rect x="445" y="6"  width="12" height="14" fill="#10b981" />
+            <line x1="477" y1="8"  x2="477" y2="30" stroke="#4b5563" stroke-width="1" /><rect x="471" y="10" width="12" height="10" fill="#ef4444" />
+            <line x1="503" y1="2"  x2="503" y2="24" stroke="#4b5563" stroke-width="1" /><rect x="497" y="4"  width="12" height="12" fill="#10b981" />
+            <line x1="529" y1="4"  x2="529" y2="26" stroke="#4b5563" stroke-width="1" /><rect x="523" y="6"  width="12" height="12" fill="#10b981" />
+            <line x1="555" y1="2"  x2="555" y2="22" stroke="#4b5563" stroke-width="1" /><rect x="549" y="4"  width="12" height="10" fill="#10b981" />
+            <line x1="581" y1="4"  x2="581" y2="24" stroke="#4b5563" stroke-width="1" /><rect x="575" y="6"  width="12" height="8"  fill="#ef4444" />
+            <line x1="607" y1="2"  x2="607" y2="20" stroke="#4b5563" stroke-width="1" /><rect x="601" y="4"  width="12" height="12" fill="#10b981" />
+            <line x1="633" y1="4"  x2="633" y2="22" stroke="#4b5563" stroke-width="1" /><rect x="627" y="6"  width="12" height="10" fill="#ef4444" />
+            <line x1="659" y1="2"  x2="659" y2="18" stroke="#4b5563" stroke-width="1" /><rect x="653" y="4"  width="12" height="10" fill="#10b981" />
+            <line x1="685" y1="4"  x2="685" y2="20" stroke="#4b5563" stroke-width="1" /><rect x="679" y="6"  width="12" height="8"  fill="#ef4444" />
+            <line x1="711" y1="2"  x2="711" y2="16" stroke="#4b5563" stroke-width="1" /><rect x="705" y="4"  width="12" height="10" fill="#10b981" />
+            <line x1="737" y1="4"  x2="737" y2="18" stroke="#4b5563" stroke-width="1" /><rect x="731" y="6"  width="12" height="8"  fill="#ef4444" />
+            <!-- 最新足（amber 強調） -->
+            <line x1="763" y1="2" x2="763" y2="14" stroke="#f59e0b" stroke-width="1.5" />
+            <rect x="757" y="4" width="12" height="8" fill="#10b981" stroke="#f59e0b" stroke-width="1" />
+            <!-- 現在値ライン -->
+            <line x1="0" y1="4" x2="780" y2="4" stroke="#10b98130" stroke-width="0.5" stroke-dasharray="3 3" />
+          </svg>
+        </div>
+        <div class="kpi-grid">
+          <div class="kpi"><div class="kpi-val up">2,341</div><div class="kpi-lbl">現在値 (JPY)</div></div>
+          <div class="kpi"><div class="kpi-val up">+28 (+1.21%)</div><div class="kpi-lbl">前日比</div></div>
+          <div class="kpi"><div class="kpi-val neu">2,298</div><div class="kpi-lbl">本日 安値</div></div>
+          <div class="kpi"><div class="kpi-val neu">2,356</div><div class="kpi-lbl">本日 高値</div></div>
+          <div class="kpi"><div class="kpi-val neu">4.2M</div><div class="kpi-lbl">出来高</div></div>
+          <div class="kpi"><div class="kpi-val neu">2.31T</div><div class="kpi-lbl">時価総額</div></div>
+        </div>
+      </div>
+
+    </footer>
+
+  </body>
 </html>
