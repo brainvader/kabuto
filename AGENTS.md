@@ -1,193 +1,359 @@
-# AI Coding Protocol (ver 6.00)
+# AI Coding Protocol (ver 9.0)
 
-あなたは私の開発パートナーとして、以下の**「証拠に基づくトップダウン開発」**に従って動作してください。
+あなたは私の開発パートナーとして、以下のプロトコルに従って動作してください。
 
-## 1. 基本コンセプト：動くものが正義
+## 1. 基本コンセプト：コンテキスト = テストファイル
 
-- **まず形にする:** 最速で `src/` 等に「実際に動くコード」を生成せよ。
-- **テストが証拠:** 正しく動くことの証明は、言葉ではなく **Playwright（視覚的証拠）** および **Vitest/RTL（論理的証拠）** で行え。
-- **進捗の定義:** 監督（ユーザー）が **Playwright のスクリーンショットを見て「意図通りだ」と認めた時**、初めて進捗として記録される。
+機能をコンテキストに分解し、**そのコンテキストの実態はテストファイルである**。
 
-## 2. 運用ルール
+- **テストファイル = LLM へのコンテキスト:** spec ファイルを渡すだけで、LLM は import から実装対象を、describe / it から期待する振る舞いを把握できる
 
-- **@story 準拠:** テストコードは @story の手順と1対1で対応させ、ユーザー体験を保証せよ。
-- **JSDocへの集約:** 実装仕様はすべてコード内の JSDoc に集約し、重複するドキュメントは作成しない。
-- **名前の絶対遵守:** BOMで決めた命名を絶対とし、実装側で勝手に変更・エイリアス化しないこと。
-- **Context Isolation:** 各部品はBOMを通じてのみ通信し、担当範囲外の実装詳細に依存しない。
-- **人間の検品:** Playwright は監督へのプレゼンである。画像で意図を証明せよ。
+```typescript
+/**
+ * このファイルを渡すだけで LLM は以下を把握できる：
+ * - 何を実装すべきか（import 群）
+ * - どう振る舞うべきか（describe / it）
+ */
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
-## 3. 標準ディレクトリ構成
+import { SourceGraphView } from './SourceGraphView'
+import { useSourceGraph } from '../hooks/useSourceGraph'
 
-    root/
-    ├── AGENTS.md            <-- 本規約（AI用OS）
-    ├── docs/                <-- 【発注・設計エリア】
-    │   ├── bom/             <-- 共通規格：Interface / Zod Schema / State Machine
-    │   └── specs/           <-- 発注書：*.spec.ts（主戦場）
-    ├── src/                 <-- 【実装・納品エリア】
-    ├── tests/               <-- 共通設定・Playwrightビジュアル検品用
-    └── context/             <-- コンテクストマッピング用のドキュメントとHTML
+describe('ファイル選択でグラフを更新する', () => {
+  it('specファイルを選択するとグラフにノードが表示される', async () => {
+    const onGetRelatedNodes = vi.fn().mockResolvedValue({ nodes: [], edges: [] })
+    render(<SourceGraphView onGetRelatedNodes={onGetRelatedNodes} />)
+    await userEvent.click(screen.getByText('useSourceGraph.test.ts'))
+    expect(onGetRelatedNodes).toHaveBeenCalledWith('useSourceGraph.test.ts')
+  })
+})
+```
 
-## 4. 開発の共通規格：BOM & @story
+- **型はテストが決める:** 型・インターフェースはテストを書く過程で自然に定まり、実装ファイルが所有・export する
+- **変更の起点はテスト:** 何かを変えたいなら、まずそのコンテキストのテストファイルを変える。テストが変われば何を実装すべきかが自明になる
+- **進捗の定義:** テストがグリーンになり、Storybook で人間が「意図通りだ」と認めた時
 
-- **BOM (Bill of Materials):** 実装前に、共有データ、関数の規格、および**状態遷移図（Mermaid）**を `docs/bom/` に確定させよ。
-- **発注書 (Spec) メイン:** 開発の主軸は `docs/specs/` 配下の `*.spec.ts` とする。監督が Slot 1 の `@story` を書いた時点で発注確定とする。
+## 2. テスト責務の分担
 
-## 5. ContextMap.html(Atomic Designの共通イメージ)
+| 層               | ツール       | 責務                                                                                             |
+| ---------------- | ------------ | ------------------------------------------------------------------------------------------------ |
+| コンテキスト定義 | Vitest + RTL | コンポーネント・hook・ユーティリティを全て import。ロジック・状態遷移を検証。コンテキストの SSOT |
+| 視覚確認         | Storybook    | describe / it と対応する Story で全状態を視覚確認。play 関数でインタラクション検証               |
+| 統合確認         | Playwright   | ネイティブ機能・ルーティング・複数コンテキストをまたぐシナリオのみ                               |
 
-大まかな画面レイアウトを示し、分割された領域に必要な機能をリストアップするためのHTMLファイル。これをもとにAIが技術スタックや必要な部品を提案する。対話的にブラッシュアップし、最終的な構成を決定するための「共通のイメージ」を提供する。各要素はコンテクストを構成し、AIはこれをもとに必要な機能を抽出し、BOMやSpecに落とし込む。
+**Playwright は「Storybook では確認できないこと」のみ。** 単一コンテキスト内の動作は Vitest / Storybook で完結させる。
+
+## 3. ディレクトリ構成
+
+```
+root/
+├── AGENTS.md                     # 本規約
+├── docs/
+│   └── context/                  # ContextMap.html（画面設計・コンテキスト分解）
+├── src/
+│   ├── components/
+│   │   ├── SourceGraphView.tsx   # 実装
+│   │   └── SourceGraphView.test.tsx  # spec（実装と並列）
+│   ├── hooks/
+│   │   ├── useProjectStore.ts
+│   │   └── useProjectStore.test.ts
+│   └── stories/
+│       └── SourceGraphView.stories.tsx  # Storybook
+└── tests/
+    └── e2e/                      # Playwright E2E のみ
+        └── taac.e2e.spec.ts
+```
+
+型・インターフェースは `src/` 内の実装ファイルが所有・export する。
+
+## 4. props DI パターン
+
+コンポーネントは外部依存（Tauri fs 等）を props で受け取る。デフォルト値を本番実装とし、テスト・Story では差し替える。
+
+```typescript
+// NG: コンポーネント内で Tauri fs を直接呼ぶ
+import { exists } from '@tauri-apps/plugin-fs'
+export function FileTree() {
+  useEffect(() => { exists(path) ... }, [])
+}
+
+// OK: props で受け取り、デフォルト値を実装とする
+type FileTreeProps = {
+  onExists?: (path: string) => Promise<boolean>
+}
+export function FileTree({ onExists = exists }: FileTreeProps = {}) { ... }
+```
+
+`vite.config.ts` の alias モックは原則不要。`src/__mocks__/` は Zustand ストア等 props に乗せられない依存のモックとして引き続き使用する。
+
+## 5. ContextMap.html（コンテキスト分解の起点）
+
+アプリの概要・画面構成・コンテキストの境界を記述する HTML ファイル。
+人間と LLM の対話の中で育てていくもの。最初から完成している必要はなく、対話を通じてコンテキストの分解・詳細化が進む。
+LLM はこれを読んでコンテキストを把握し、Vitest spec の生成・対話に入る。
 
 ```html
 <!DOCTYPE html>
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <title>Context Map: Vibe to Features</title>
-    <!-- グローバルストアの例。実際のアプリでは、これをもとに必要なデータ構造を定義し、BOMに落とし込む。 -->
+    <title>ContextMap: [アプリ名]</title>
+
+    <!--
+      STACK
+      runtime:  Tauri 2
+      frontend: React 18 + TypeScript
+      router:   TanStack Router
+      state:    Zustand
+      testing:  Vitest + RTL + Storybook + Playwright
+      package:  pnpm
+    -->
+
+    <!-- global state: 複数コンポーネントをまたいで共有する状態のみ定義する -->
     <script id="global-store" type="application/json">
-      { "currentUser": "John", "theme": "dark", "activeProjectId": null }
+      { "activeProjectId": null }
     </script>
+
     <style>
-      /* 構造把握のための最低限の装飾 */
-      .area {
-        border: 1px solid #ccc;
-        padding: 20px;
-        margin: 10px;
+      body {
+        display: flex;
+        height: 100vh;
+        margin: 0;
+        font-family: sans-serif;
       }
-      .features {
-        color: #2563eb;
+
+      #project-list {
+        width: 240px;
+        border-right: 1px solid #ccc;
+        padding: 16px;
+        overflow-y: auto;
       }
-      .features li {
-        margin-bottom: 5px;
+
+      #project-detail {
+        flex: 1;
+        display: flex;
+        gap: 16px;
+        padding: 16px;
+      }
+
+      #file-tree {
+        width: 200px;
+      }
+
+      #source-graph {
+        flex: 1;
       }
     </style>
   </head>
   <body>
-    <h1>[アプリ名]</h1>
-    <p>技術スタック案: React, Lucide, XState</p>
+    <nav id="project-list">
+      <!-- local state -->
+      <script
+        data-component="project-list"
+        class="local-state"
+        type="application/json"
+      >
+        { "isNewProjectDialogOpen": false }
+      </script>
 
-    <nav class="area">
-      <h2>Side Navigation</h2>
-      <ul class="features">
-        <li>[Feature]: プロジェクト一覧を表示し、選択可能にする</li>
-        <li>[Feature]: 下部に設定ボタンを配置する</li>
-      </ul>
+      <!-- プロジェクトカード一覧を表示する -->
+      <!-- カードをクリックすると activeProjectId を更新し詳細へ遷移する -->
     </nav>
 
-    <main class="area">
-      <h2>Main Content</h2>
-      <ul class="features">
-        <li>[Feature]: 選択中のプロジェクトの詳細をカード形式で表示する</li>
-        <li>[Feature]: データの追加・削除ができるフォームを置く</li>
-      </ul>
+    <main id="project-detail">
+      <!-- 選択中プロジェクトのファイルツリーとソースグラフを並べて表示する -->
+
+      <div id="file-tree">
+        <!-- ファイルツリーを表示する -->
+        <!-- ファイルをクリックするとソースグラフを更新する -->
+      </div>
+
+      <div id="source-graph">
+        <!-- 選択ファイルの依存グラフを表示する -->
+      </div>
     </main>
 
-    <div class="area" id="sidebar">
-      {# サイドバーの状態管理の例 #}
-      <script type="application/json">
-        { "isCollapsed": false, "hoveredIndex": -1 }
+    <!-- overlay: position:fixed のため </body> 直前に配置する -->
+    <dialog id="new-project-dialog">
+      <!-- local state -->
+      <script
+        data-component="new-project-dialog"
+        class="local-state"
+        type="application/json"
+      >
+        {
+          "form": { "name": "", "rootPath": "" },
+          "errors": { "name": null, "rootPath": null }
+        }
       </script>
-      <ul class="features">
-        <li>[Feature]: Global Store の activeProjectId を更新する</li>
-        <li>[Feature]: isCollapsed が true の時はアイコンのみ表示</li>
-      </ul>
-    </div>
+
+      <!-- プロジェクト作成フォームを表示する -->
+    </dialog>
   </body>
 </html>
 ```
 
-## 6. Specファイルのひな型
+## 6. テストファイルのひな型
 
-AIは、`docs/specs/*.spec.ts` 内に以下の **4スロット** を厳密に構成せよ。
+### 6-1. Vitest test（`src/**/*.test.tsx`）
+
+コンテキストの SSOT。import がスコープを定義し、describe が機能名・it が振る舞いを記述する。
 
 ```typescript
-/**
- * Slot 1: 発注用ヘッダー (JSDoc Metadata)
- * @context [コンポーネント名/機能名]
- * @bom [docs/bom/ 配下のファイルへのパス]
- * @story
- * 1. [ユーザー操作]
- * 2. [システム/UIの反応]
- * @output [src/ 配下の実装ファイルパス]
- */
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 
-/**
- * Slot 2: 外部依存のインポート (Imports)
- */
-import { test, expect } from '@playwright/test';
-import { render, screen } from '@testing-library/react';
-import type { [BOM名] } from '../../bom/[BOMファイル名]';
-import { [ComponentName] } from '@output';
+// このコンテキストに属するすべてのモジュールを import する
+// → get_related_nodes による依存解析の起点になる
+import { ComponentName } from './ComponentName'
+import { useHookName } from '../hooks/useHookName'
 
-/**
- * Slot 3: モック・セットアップ (Test Setup)
- * 実装と検証を切り離すための「独立した基準器」。
- */
-const setupMock = () => {
-  const mockData: [BOM名] = {
-    // BOMに基づいたダミーデータ定義
-  };
-  return mockData;
+// ── モック ──────────────────────────────────────────────────
+// レンダリングを持つ外部UIライブラリ（ReactFlow 等）は vi.mock(...) でモックする。
+// ロジック・状態遷移の検証に集中し、ライブラリ自体の動作検証は行わない。
+const { mockFn } = vi.hoisted(() => ({ mockFn: vi.fn() }))
+vi.mock('../hooks/useExternalHook', () => ({ useExternalHook: () => mockFn }))
+
+// ── テスト ──────────────────────────────────────────────────
+describe('[機能名]', () => {
+  it('[振る舞いの記述]', async () => {
+    render(<ComponentName onAction={mockFn} />)
+    await userEvent.click(screen.getByRole('button', { name: /ラベル/ }))
+    expect(mockFn).toHaveBeenCalledOnce()
+  })
+})
+```
+
+### 6-2. Storybook Story（`src/stories/*.stories.tsx`）
+
+spec の describe / it と対応させる。視覚確認と play 関数によるインタラクション検証。
+
+```typescript
+import type { Meta, StoryObj } from "@storybook/react-vite";
+import { expect, userEvent, within } from "storybook/test";
+import { fn } from "storybook/test";
+import { ComponentName } from "@/components/ComponentName";
+
+const meta: Meta<typeof ComponentName> = { component: ComponentName };
+export default meta;
+type Story = StoryObj<typeof ComponentName>;
+
+export const Default: Story = {
+  args: { onAction: fn() },
+  play: async ({ canvasElement, args }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole("button", { name: /ラベル/ }));
+    await expect(args.onAction).toHaveBeenCalledOnce();
+  },
 };
+```
 
-/**
- * Slot 4: 挙動の検証コード (Story Verification)
- */
+### 6-3. Playwright E2E（`tests/e2e/*.e2e.spec.ts`）
 
-// --- 1. AIの内省 (Logic Verification) ---
-// AIが自己修正ループを回し、ロジックを固めるための高速ループ。
-// test('logic: should handle state transition', () => { ... });
+複数コンテキストをまたぐ統合シナリオのみ。単一コンテキスト内の検証はここに書かない。
 
-// --- 2. 監督へのプレゼン (Visual Story) ---
-test.describe('[Context] Visual Story', () => {
-  test('should satisfy the story steps with evidence', async ({ page }) => {
-    // @story の手順を実演し、スクリーンショットを撮影。
-    // 修正時は `result_before.png` と `result_after.png` を出力し比較可能にせよ。
-    await page.screenshot({ path: `evidence/[Context]_result.png` });
+```typescript
+import { test, expect } from "@playwright/test";
+
+test.describe("[統合シナリオ名]", () => {
+  test("[検証内容]", async ({ page }) => {
+    await page.goto("/");
+    // ...
+    await page.screenshot({ path: "evidence/[scenario]_result.png" });
   });
 });
 ```
 
-## 7. 実行ワークフロー（フェーズ分離型）
+## 7. 実行ワークフロー
 
-本プロトコルは**設計フェーズ**と**実装フェーズ**に分離する。
-Specが両フェーズの**境界面**となる。
+```mermaid
+flowchart TD
+    A["(人間 + LLM）<br/>ContextMap.html<br/>対話的にコンテキストを生成"]
+    B["（LLM）<br/>Vitest spec<br/>import = スコープ / describe = 境界"]
+    C["（人間）<br/>spec レビュー<br/>承認 = コンテキスト定義の完了"]
+    D["（LLM）<br/>実装<br/>spec の import が実装対象をすべて示す"]
+    E["（人間）<br/>pnpm vitest run"]
+    F["（LLM）<br/>Story 生成"]
+    G["（人間）<br/>pnpm storybook"]
+    H{"複数コンテキストの統合が必要？"}
+    I["（LLM）<br/>E2E spec 生成<br/>統合シナリオのみ"]
+    K["（人間）<br/>pnpm playwright test"]
+    J(["次のコンテキストへ"])
 
+    A --> B --> C
+    C -- NG --> B
+    C -- OK --> D --> E
+    E -- "失敗<br/>結果を LLM に渡す" --> D
+    E -- グリーン --> F --> G
+    G -- NG --> F
+    G -- OK / 実装完了 --> H
+    H -- No --> J
+    H -- Yes --> I --> K
+    K -- 失敗 --> I
+    K -- OK --> J
 ```
-ContextMap.html → BOM → Spec  ←【境界面】→  実装 → 証拠
-```
 
----
+### Step 1: コンテキスト定義（人間 + LLM の対話）
 
-### 【設計フェーズ】設計モデルを使用
+LLM と対話しながら ContextMap.html を育て、コンテキストを分解する。
+LLM はアプリの概要を聞き、画面構成・機能・境界を提案しながら ContextMap を完成させていく。
 
-設計モデルはContextMap.htmlを読み、往復を最小化してBOM・Specを生成する。
-抽象的な指示から具体的な設計を導出する能力が必要。
+### Step 2: spec 生成（LLM）
 
-1. **概要説明:** ContextMap.htmlを用いてアプリの概要と画面構成を説明する。
-2. **構成提案:** 設計モデルはContextMap.htmlから技術スタックを提案する。
-3. **構成決定:** 人間はAIの提案をブラッシュアップし、必要な部品を決定する。
-4. **BOM作成:** 設計モデルは部品をBOM（Zod Schema/Type）として `docs/bom/` に生成する。
-5. **状態定義:** 設計モデルは状態遷移をMermaid等で可視化し、BOMの一部として保存する。
-6. **Spec作成:** 設計モデルはSpecファイルの Slot 1 に @story を記載する。
-7. **ひな型完成:** 設計モデルはSpec ファイルの全Slotを埋め、テストの「器」を完成させる。
-8. **フロー承認:** 人間はSpecを確認し、実装の開始を承認する。← **設計フェーズの完了条件**
+LLM は ContextMap.html を読み、`src/` 配下に `*.test.tsx` を生成する。
 
----
+- import 群でスコープを宣言する
+- describe / it で機能名と振る舞いを記述する
+- 必要な型・インターフェースはテストの中で自然に定まる
 
-### 【実装フェーズ】実装モデルを使用
+### Step 3: spec レビュー（人間）
 
-実装モデルはSpecを受け取り、忠実にコードを生成する。
-Specが十分に具体的であれば、追加のプロンプトエンジニアリングは不要。
+spec を確認し、実装の開始を承認する。**← コンテキスト定義の完了条件**
 
-9. **実装実行:** 実装モデルはSpecの @story を元に `src/` にコードを実装する。
-10. **ビジュアル出力:** 実装モデルはPlaywrightでスクリーンショットを撮影する。
-11. **内省ループ:** 実装モデルは自らテスト（RTL等）を実行し、ロジックの不備を自己修正する。
-12. **人間検品:** 人間が画面を確認。意図と異なる場合はAIが修正し、`evidence/` ディレクトリに `result_before.png`（修正前）および `result_after.png`（修正後）を保存し再提出する。
-13. **ロジック深掘り:** 見た目では分からないエッジケースのテストを追加し、堅牢にする。
-14. **パス確認:** 人間が全テストのパスを確認し、承認する。← **実装フェーズの完了条件**
+### Step 4: 実装（LLM → 人間が確認）
 
----
+spec の import が実装すべきファイルをすべて示している。
+LLM は実装を提案し、人間が `pnpm vitest run` で確認する。
+失敗した場合は結果を LLM に渡して対話的に修正する。型は実装ファイルが所有・export する。
 
-### 【次コンテキストへ】
+### Step 5: 視覚確認（人間）
 
-15. **次コンテキスト:** storyが満たされたら、設計フェーズの手順3（構成決定）に戻り、次のコンテキストを開始する。
+`src/stories/` に Story を生成し、Storybook で全状態を確認する。
+人間が「意図通りだ」と認めたら完了。**← 実装フェーズの完了条件**
+
+### Step 6: 統合確認（必要な場合のみ）
+
+複数コンテキストをまたぐシナリオが発生した場合のみ `tests/e2e/` に E2E を追加する。
+
+### Step 7: 次のコンテキストへ
+
+Step 1 に戻り、次のコンテキストを対話的に定義する。
+
+## 8. 運用ルール
+
+- **名前の遵守:** テストで決めた命名を実装側で勝手に変えない
+- **JSDoc:** 実装ファイルに仕様を集約する。重複するドキュメントは作らない
+- **セレクタ:** E2E は `data-testid` を使用する（例: `file-tree`, `source-graph`）
+- **既存コードの扱い:** 壊れていないものを無理に改修しない。新規コンテキストから新方針を適用する
+
+## 9. Code Delivery Format
+
+- コード変更は **unified diff（patch）形式** で提供する（トークン削減のため）
+- patch 適用: `git apply --ignore-whitespace {feature-name}.patch`
+- patch は必ずファイルとしてダウンロードして適用する。コピーボタン経由では末尾空行が切り捨てられ corrupt patch エラーになる
+- **注意:** Windows 環境では CRLF 問題で `git apply` が失敗することがある。その場合は完全ファイル出力に切り替える
+- 新規ファイルは patch が存在しないため完全ファイルで提供する
+- 1ファイル・1ステップずつ提供し、ビルド／テスト確認後に次へ進む
+- スクリプト実行は `script.sh` に記述して実行する（複数コマンドをまとめて渡す用途）。`script.sh` は `.gitignore` で追跡対象外
+- コミットメッセージは Conventional Commits 形式・英語・1行（例: `feat: implement TaaC layout`）
+
+## 既知の技術的制約
+
+- **SurrealDB:** `=2.6.5` で exact pin 必須（unpinned だと 3.x が解決されてコンパイル不可）
+- **ReactFlow:** `useNodesState` / `useEdgesState` を使わない。controlled mode + content-comparison stabilization で無限ループを防ぐ
+- **Storybook imports:** `storybook/test`（`@storybook/test` は v8 パッケージ）
+- **`vi.hoisted()`:** Zustand ストアモックは必須
+- **ReactFlow `NODE_TYPES`:** コンポーネント外で定義する（内部で定義すると再レンダー毎にリセット）
