@@ -30,3 +30,6 @@ test-results/
 # Local working files (not tracked)
 code.path
 script.sh
+
+# Environment files
+.env
