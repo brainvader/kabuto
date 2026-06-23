@@ -1,43 +1,74 @@
-//! EDINET API v2 から有価証券報告書（XBRL）をダウンロードする CLI ツール。
+//! EDINET API v2 から有価証券報告書（XBRL）および EDINETコードリストを取得する CLI ツール。
 //!
-//! 使い方:
-//!     cargo run -p fetch_xbrl -- --from 2025-06-01 --to 2025-06-10
-//!     cargo run -p fetch_xbrl -- --from 2025-06-01 --to 2025-06-30 --sec-code 285A
+//! サブコマンド:
+//!
+//!   # EDINETコードリストを取得して CSV に保存
+//!   cargo run -p fetch_xbrl -- codelist
+//!   cargo run -p fetch_xbrl -- codelist --output D:/data/codelist
+//!
+//!   # XBRL（有価証券報告書）を取得
+//!   cargo run -p fetch_xbrl -- fetch --from 2025-06-01 --to 2025-06-30
+//!   cargo run -p fetch_xbrl -- fetch --from 2025-06-01 --to 2025-06-30 --sec-code 285A
+//!   cargo run -p fetch_xbrl -- fetch --from 2025-06-01 --to 2025-06-30 --edinet-code E37543
+//!   cargo run -p fetch_xbrl -- fetch --from 2025-06-01 --to 2025-06-30 --name キオクシア
 
 use anyhow::{Context, Result};
 use chrono::{Duration, NaiveDate};
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use serde::Deserialize;
 use serde_json::Value;
 use std::{fs, io::Cursor, path::PathBuf, thread, time};
 
 const BASE_URL: &str = "https://api.edinet-fsa.go.jp/api/v2";
-const DEFAULT_OUTPUT: &str = "data/xbrl";
+const CODELIST_URL: &str =
+    "https://disclosure2dl.edinet-fsa.go.jp/searchdocument/codelist/Edinetcode.zip";
+
+// ── CLI 定義 ─────────────────────────────────────────────
 
 #[derive(Parser, Debug)]
-#[command(
-    name = "fetch_xbrl",
-    about = "EDINET API v2 から有価証券報告書（XBRL）をダウンロード"
-)]
-struct Args {
-    #[arg(long, value_name = "DATE")]
-    from: NaiveDate,
-    #[arg(long, value_name = "DATE")]
-    to: NaiveDate,
-    #[arg(long = "edinet-code", value_name = "CODE")]
-    edinet_codes: Vec<String>,
-    #[arg(long = "sec-code", value_name = "CODE")]
-    sec_codes: Vec<String>,
-    #[arg(long = "name", value_name = "NAME")]
-    names: Vec<String>,
-    #[arg(long, value_name = "DIR", default_value = DEFAULT_OUTPUT)]
-    output: PathBuf,
-    /// デバッグ: APIレスポンスの生JSONを出力する
-    #[arg(long)]
-    debug: bool,
+#[command(name = "fetch_xbrl", about = "EDINET API v2 ツール")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
 }
 
-// resultsの各フィールドはすべてnullになりうるため Option<String> で受ける
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// EDINETコードリスト（全上場企業一覧）を取得して CSV に保存
+    Codelist {
+        /// 出力先ディレクトリ（デフォルト: data/codelist）
+        #[arg(long, value_name = "DIR", default_value = "data/codelist")]
+        output: PathBuf,
+    },
+    /// 有価証券報告書（XBRL）を取得
+    Fetch {
+        /// 検索開始日 YYYY-MM-DD
+        #[arg(long, value_name = "DATE")]
+        from: NaiveDate,
+        /// 検索終了日 YYYY-MM-DD
+        #[arg(long, value_name = "DATE")]
+        to: NaiveDate,
+        /// EDINETコードで絞り込み（複数可）例: E37543
+        #[arg(long = "edinet-code", value_name = "CODE")]
+        edinet_codes: Vec<String>,
+        /// 証券コードで絞り込み（複数可）例: 285A
+        #[arg(long = "sec-code", value_name = "CODE")]
+        sec_codes: Vec<String>,
+        /// 会社名（部分一致）で絞り込み（複数可）
+        #[arg(long = "name", value_name = "NAME")]
+        names: Vec<String>,
+        /// 出力先ディレクトリ（デフォルト: data/xbrl）
+        #[arg(long, value_name = "DIR", default_value = "data/xbrl")]
+        output: PathBuf,
+        /// デバッグ: APIレスポンスの生JSONを出力
+        #[arg(long)]
+        debug: bool,
+    },
+}
+
+// ── EDINET API レスポンス型 ───────────────────────────────
+
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Document {
@@ -52,8 +83,6 @@ struct Document {
     period_start: Option<String>,
     period_end: Option<String>,
     submit_date_time: Option<String>,
-    // 仕様書にある残りのフィールドも受け取る（無視するが存在しないとパース失敗する場合があるため）
-    #[serde(default)]
     seq_number: Option<u64>,
     #[serde(rename = "JCN")]
     jcn: Option<String>,
@@ -82,6 +111,8 @@ impl Document {
         self.ordinance_code.as_deref() == Some("010") && self.form_code.as_deref() == Some("030000")
     }
 }
+
+// ── フィルター ────────────────────────────────────────────
 
 struct Filter {
     edinet_codes: Vec<String>,
@@ -114,38 +145,119 @@ impl Filter {
     }
 }
 
+// ── メイン ───────────────────────────────────────────────
+
 fn main() -> Result<()> {
+    // Windows のコンソール出力を UTF-8 に設定
+    #[cfg(target_os = "windows")]
+    unsafe {
+        windows_sys::Win32::System::Console::SetConsoleOutputCP(65001);
+    }
+
     for base in &["scripts/fetch_xbrl", ".", "..", "../.."] {
         let path = std::path::Path::new(base).join(".env");
         if path.exists() {
             dotenv::from_path(&path).ok();
-            println!(".env: {}", path.canonicalize()?.display());
             break;
         }
     }
 
-    let args = Args::parse();
-    let api_key =
-        std::env::var("EDINET_API_KEY").context(".env に EDINET_API_KEY が設定されていません")?;
+    let cli = Cli::parse();
 
-    let filter = Filter {
-        edinet_codes: args.edinet_codes,
-        sec_codes: args.sec_codes,
-        names: args.names,
-    };
+    match cli.command {
+        Command::Codelist { output } => run_codelist(&output),
+        Command::Fetch {
+            from,
+            to,
+            edinet_codes,
+            sec_codes,
+            names,
+            output,
+            debug,
+        } => {
+            let api_key = std::env::var("EDINET_API_KEY")
+                .context(".env に EDINET_API_KEY が設定されていません")?;
+            let filter = Filter {
+                edinet_codes,
+                sec_codes,
+                names,
+            };
+            run_fetch(&api_key, &filter, from, to, &output, debug)
+        }
+    }
+}
 
-    fs::create_dir_all(&args.output)?;
-    println!("出力先: {}", args.output.canonicalize()?.display());
-    println!("期間: {} 〜 {}", args.from, args.to);
+// ── codelist サブコマンド ─────────────────────────────────
+
+fn run_codelist(output_dir: &PathBuf) -> Result<()> {
+    fs::create_dir_all(output_dir)?;
+
+    println!("EDINETコードリストをダウンロード中...");
+    println!("URL: {}", CODELIST_URL);
+
+    let client = reqwest::blocking::Client::new();
+    let bytes = client
+        .get(CODELIST_URL)
+        .timeout(std::time::Duration::from_secs(60))
+        .send()?
+        .error_for_status()?
+        .bytes()?;
+
+    println!("ダウンロード完了 ({} bytes) ZIPを展開中...", bytes.len());
+
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+    archive.extract(output_dir)?;
+
+    // Shift-JIS → UTF-8 変換
+    println!("Shift-JIS → UTF-8 変換中...");
+    for entry in fs::read_dir(output_dir)?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("csv") {
+            let raw = fs::read(&path)?;
+            let (decoded, _, _) = encoding_rs::SHIFT_JIS.decode(&raw);
+            fs::write(&path, decoded.as_bytes())?;
+            println!(
+                "  ✓ {} (UTF-8変換済)",
+                path.file_name().unwrap_or_default().to_string_lossy()
+            );
+        }
+    }
+
+    println!("✓ 出力先: {}", output_dir.canonicalize()?.display());
+    Ok(())
+}
+
+// ── fetch サブコマンド ────────────────────────────────────
+
+fn run_fetch(
+    api_key: &str,
+    filter: &Filter,
+    from: NaiveDate,
+    to: NaiveDate,
+    output_dir: &PathBuf,
+    debug: bool,
+) -> Result<()> {
+    fs::create_dir_all(output_dir)?;
+    println!("出力先: {}", output_dir.canonicalize()?.display());
+    println!(
+        "期間: {} 〜 {} ({} 日間)",
+        from,
+        to,
+        (to - from).num_days() + 1
+    );
+    if filter.is_empty() {
+        println!("絞り込み: なし（全社）");
+    }
     println!("{}", "─".repeat(60));
 
-    let mut current = args.from;
+    let mut current = from;
     let mut found = 0;
 
-    while current <= args.to {
+    while current <= to {
         let date_str = current.format("%Y-%m-%d").to_string();
 
-        match get_documents(&api_key, &date_str, args.debug) {
+        match get_documents(api_key, &date_str, debug) {
             Ok(docs) => {
                 let matched: Vec<_> = docs
                     .iter()
@@ -169,7 +281,7 @@ fn main() -> Result<()> {
                     }
 
                     let edinet_code = doc.edinet_code.as_deref().unwrap_or("unknown");
-                    match download_and_extract(&api_key, &doc.doc_id, edinet_code, &args.output) {
+                    match download_and_extract(api_key, &doc.doc_id, edinet_code, output_dir) {
                         Ok(out_dir) => {
                             let xbrl_files = find_files_by_ext(&out_dir, "xbrl");
                             println!(
@@ -194,6 +306,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+// ── API 呼び出し ─────────────────────────────────────────
+
 fn get_documents(api_key: &str, date: &str, debug: bool) -> Result<Vec<Document>> {
     let url = format!("{}/documents.json", BASE_URL);
     let client = reqwest::blocking::Client::new();
@@ -209,19 +323,12 @@ fn get_documents(api_key: &str, date: &str, debug: bool) -> Result<Vec<Document>
         eprintln!("[DEBUG {}]\n{}", date, &text[..text.len().min(1000)]);
     }
 
-    // まず Value として受け取り results だけ取り出す
     let root: Value =
-        serde_json::from_str(&text).with_context(|| format!("JSON全体のパース失敗 ({})", date))?;
+        serde_json::from_str(&text).with_context(|| format!("JSONパース失敗 ({})", date))?;
 
     let results = match root.get("results") {
         Some(Value::Array(arr)) => arr.clone(),
-        Some(Value::Null) | None => return Ok(vec![]),
-        Some(other) => {
-            if debug {
-                eprintln!("[DEBUG] results の型が予想外: {:?}", other);
-            }
-            return Ok(vec![]);
-        }
+        _ => return Ok(vec![]),
     };
 
     let mut docs = Vec::new();
@@ -230,7 +337,7 @@ fn get_documents(api_key: &str, date: &str, debug: bool) -> Result<Vec<Document>
             Ok(doc) => docs.push(doc),
             Err(e) => {
                 if debug {
-                    eprintln!("[DEBUG] Document パース失敗: {}\n  item: {}", e, item);
+                    eprintln!("[DEBUG] パース失敗: {}\n  item: {}", e, item);
                 }
             }
         }

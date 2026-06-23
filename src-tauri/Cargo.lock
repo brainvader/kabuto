@@ -1161,9 +1161,11 @@ dependencies = [
  "chrono",
  "clap",
  "dotenv",
+ "encoding_rs",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "windows-sys 0.59.0",
  "zip",
 ]
 
