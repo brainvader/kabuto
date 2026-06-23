@@ -2557,6 +2557,8 @@ dependencies = [
 name = "kabuto"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "polars",
  "serde",
  "serde_json",
  "tauri",
