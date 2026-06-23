@@ -2,14 +2,14 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
-import { StockSearch } from './StockSearch'
-import { useStockSearch } from '../hooks/useStockSearch'
+import { StockSearch } from '@/components/StockSearch'
+import { useStockSearch } from '@/hooks/useStockSearch'
 
 // ── モック ──────────────────────────────────────────────────
 // useStockSearch の戻り値型から動的にモックを生成する
 type UseStockSearchReturn = ReturnType<typeof useStockSearch>
 
-vi.mock('../hooks/useStockSearch')
+vi.mock('@/hooks/useStockSearch')
 const mockUseStockSearch = vi.mocked(useStockSearch)
 
 const mockResults = [

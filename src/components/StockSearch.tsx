@@ -1,5 +1,5 @@
 import { Search, Loader2 } from 'lucide-react'
-import { useStockSearch, type StockItem } from '../hooks/useStockSearch'
+import { useStockSearch, type StockItem } from '@/hooks/useStockSearch'
 
 const MARKETS = ['ALL', 'JPX', 'NYSE', 'NASDAQ'] as const
 const SECTORS = ['全セクター', 'エネルギー', '素材', '情報技術', '金融', '輸送用機器', '電気機器'] as const
