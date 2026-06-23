@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { StockSearch } from './StockSearch'
@@ -41,7 +41,7 @@ describe('銘柄を検索・選択する', () => {
 
         render(<StockSearch onSelect={onSelect} />)
 
-        await userEvent.type(screen.getByRole('searchbox'), 'INPEX')
+        fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'INPEX' } })
         expect(setQuery).toHaveBeenCalledWith('INPEX')
     })
 

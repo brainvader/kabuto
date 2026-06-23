@@ -4,7 +4,6 @@ import { renderHook, act } from '@testing-library/react'
 import { useStockSearch } from './useStockSearch'
 
 // ── モック ──────────────────────────────────────────────────
-// Tauri IPC（invoke）をモックし、Polars-rs の呼び出しを差し替える
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mockInvoke }))
 
@@ -18,6 +17,7 @@ const mockStocks = [
 
 describe('銘柄検索クエリを管理する', () => {
     beforeEach(() => {
+        vi.clearAllMocks()
         mockInvoke.mockResolvedValue(mockStocks)
     })
 
@@ -49,6 +49,9 @@ describe('銘柄検索クエリを管理する', () => {
 
         await act(async () => {
             result.current.setQuery('エネルギー')
+        })
+
+        await act(async () => {
             result.current.setMarket('プライム')
         })
 
@@ -59,6 +62,10 @@ describe('銘柄検索クエリを管理する', () => {
 
     it('setSector を呼ぶと sector フィルター付きで invoke が発行される', async () => {
         const { result } = renderHook(() => useStockSearch())
+
+        await act(async () => {
+            result.current.setQuery('INPEX')
+        })
 
         await act(async () => {
             result.current.setSector('鉱業')
