@@ -6,13 +6,11 @@ import { StockSearch } from './StockSearch'
 import { useStockSearch } from '../hooks/useStockSearch'
 
 // ── モック ──────────────────────────────────────────────────
-// useStockSearch の内部（Tauri IPC）をモックし、UIロジックに集中する
-const { mockUseStockSearch } = vi.hoisted(() => ({
-    mockUseStockSearch: vi.fn(),
-}))
-vi.mock('../hooks/useStockSearch', () => ({
-    useStockSearch: mockUseStockSearch,
-}))
+// useStockSearch の戻り値型から動的にモックを生成する
+type UseStockSearchReturn = ReturnType<typeof useStockSearch>
+
+vi.mock('../hooks/useStockSearch')
+const mockUseStockSearch = vi.mocked(useStockSearch)
 
 const mockResults = [
     { code: '1605', name: 'INPEX CORPORATION', market: 'プライム', sector: '鉱業' },
@@ -20,7 +18,7 @@ const mockResults = [
     { code: '7203', name: 'トヨタ自動車', market: 'プライム', sector: '輸送用機器' },
 ]
 
-const defaultHookReturn = {
+const defaultHookReturn: UseStockSearchReturn = {
     results: mockResults,
     query: '',
     market: null,
@@ -34,12 +32,11 @@ const defaultHookReturn = {
 // ── テスト ──────────────────────────────────────────────────
 
 describe('銘柄を検索・選択する', () => {
-    it('検索ボックスにテキストを入力すると setQuery が呼ばれる', async () => {
+    it('検索ボックスにテキストを入力すると setQuery が呼ばれる', () => {
         const setQuery = vi.fn()
         mockUseStockSearch.mockReturnValue({ ...defaultHookReturn, setQuery })
-        const onSelect = vi.fn()
 
-        render(<StockSearch onSelect={onSelect} />)
+        render(<StockSearch onSelect={vi.fn()} />)
 
         fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'INPEX' } })
         expect(setQuery).toHaveBeenCalledWith('INPEX')
