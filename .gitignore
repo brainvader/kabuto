@@ -33,3 +33,6 @@ script.sh
 
 # Environment files
 .env
+
+#
+data/
