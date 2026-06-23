@@ -17,6 +17,12 @@ anyhow = "1"
 chrono = "0.4"
 clap = { version = "4", features = ["derive"] }
 encoding_rs = "0.8"
+polars = { version = "0.46", features = [
+    "csv",
+    "parquet",
+    "lazy",
+    "dtype-full",
+] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }

@@ -12,9 +12,11 @@
 //!   cargo run -p fetch_xbrl -- fetch --from 2025-06-01 --to 2025-06-30 --edinet-code E37543
 //!   cargo run -p fetch_xbrl -- fetch --from 2025-06-01 --to 2025-06-30 --name キオクシア
 
+use ::zip::ZipArchive;
 use anyhow::{Context, Result};
 use chrono::{Duration, NaiveDate};
 use clap::{Parser, Subcommand};
+use polars::prelude::*;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{fs, io::Cursor, path::PathBuf, thread, time};
@@ -38,6 +40,18 @@ enum Command {
     Codelist {
         /// 出力先ディレクトリ（デフォルト: data/codelist）
         #[arg(long, value_name = "DIR", default_value = "data/codelist")]
+        output: PathBuf,
+    },
+    /// 東証上場銘柄一覧とEDINETコードリストを結合してParquetに保存
+    Master {
+        /// 東証上場銘柄一覧CSV（data_j.csv）
+        #[arg(long, value_name = "FILE")]
+        jpx: PathBuf,
+        /// EDINETコードリストCSV（EdinetcodeDlInfo.csv）
+        #[arg(long, value_name = "FILE")]
+        codelist: PathBuf,
+        /// 出力Parquetファイルパス
+        #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
         output: PathBuf,
     },
     /// 有価証券報告書（XBRL）を取得
@@ -165,6 +179,11 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Master {
+            jpx,
+            codelist,
+            output,
+        } => run_master(&jpx, &codelist, &output),
         Command::Codelist { output } => run_codelist(&output),
         Command::Fetch {
             from,
@@ -187,6 +206,98 @@ fn main() -> Result<()> {
     }
 }
 
+// ── master サブコマンド ───────────────────────────────────
+
+fn run_master(jpx_path: &PathBuf, codelist_path: &PathBuf, output_path: &PathBuf) -> Result<()> {
+    println!("JPX銘柄一覧を読み込み中: {}", jpx_path.display());
+
+    // JPX CSV 読み込み
+    // 列: 日付,コード,銘柄名,市場・商品区分,33業種コード,33業種区分,17業種コード,17業種区分,規模コード,規模区分
+    let jpx = CsvReadOptions::default()
+        .with_has_header(true)
+        .with_infer_schema_length(Some(10))
+        .try_into_reader_with_file_path(Some(jpx_path.clone()))?
+        .finish()
+        .map_err(|e| anyhow::anyhow!("JPX CSV読み込み失敗: {}", e))?;
+
+    println!("  → {} 件", jpx.height());
+
+    // コード列を文字列に統一（4桁ゼロ埋め）
+    let jpx = jpx
+        .lazy()
+        .with_column(col("コード").cast(DataType::String).alias("証券コード"))
+        .select([
+            col("証券コード"),
+            col("銘柄名"),
+            col("市場・商品区分").alias("市場区分"),
+            col("33業種区分"),
+            col("17業種区分"),
+            col("規模区分"),
+        ])
+        .collect()
+        .map_err(|e| anyhow::anyhow!("JPX変換失敗: {}", e))?;
+
+    println!(
+        "EDINETコードリストを読み込み中: {}",
+        codelist_path.display()
+    );
+
+    // EDINETコードリスト読み込み（1行目はヘッダー情報なのでスキップ）
+    // 列: EDINETコード,提出者種別,上場区分,連結の有無,資本金,決算日,提出者名,...,証券コード,提出者法人番号
+    // 証券コードは "409A0" のような英数字混在があるため全列Stringで読んでからcast
+    let codelist = CsvReadOptions::default()
+        .with_has_header(true)
+        .with_skip_rows(1)
+        .with_infer_schema_length(Some(0))
+        .try_into_reader_with_file_path(Some(codelist_path.clone()))?
+        .finish()
+        .map_err(|e| anyhow::anyhow!("EDINETコードリスト読み込み失敗: {}", e))?;
+
+    println!("  → {} 件", codelist.height());
+
+    let codelist = codelist
+        .lazy()
+        .select([
+            col("ＥＤＩＮＥＴコード").alias("EDINETコード"),
+            col("決算日"),
+            col("提出者法人番号").alias("法人番号"),
+            col("証券コード"),
+        ])
+        .collect()
+        .map_err(|e| anyhow::anyhow!("EDINET変換失敗: {}", e))?;
+
+    // 結合: 証券コードをキーにinner join
+    println!("結合中...");
+    let master = jpx
+        .lazy()
+        .join(
+            codelist.lazy(),
+            [col("証券コード")],
+            [col("証券コード")],
+            JoinArgs::new(JoinType::Left),
+        )
+        .collect()
+        .map_err(|e| anyhow::anyhow!("結合失敗: {}", e))?;
+
+    println!("  → {} 件", master.height());
+
+    // Parquet出力
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let mut file = std::fs::File::create(output_path)?;
+    ParquetWriter::new(&mut file)
+        .finish(&mut master.clone())
+        .map_err(|e| anyhow::anyhow!("Parquet書き込み失敗: {}", e))?;
+
+    println!("✓ 保存完了: {}", output_path.display());
+    println!("  列: {:?}", master.get_column_names());
+    println!("  行数: {}", master.height());
+
+    Ok(())
+}
+
 // ── codelist サブコマンド ─────────────────────────────────
 
 fn run_codelist(output_dir: &PathBuf) -> Result<()> {
@@ -206,7 +317,7 @@ fn run_codelist(output_dir: &PathBuf) -> Result<()> {
     println!("ダウンロード完了 ({} bytes) ZIPを展開中...", bytes.len());
 
     let cursor = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(cursor)?;
+    let mut archive = ZipArchive::new(cursor)?;
     archive.extract(output_dir)?;
 
     // Shift-JIS → UTF-8 変換
@@ -366,7 +477,7 @@ fn download_and_extract(
     fs::create_dir_all(&out_dir)?;
 
     let cursor = Cursor::new(bytes);
-    let mut archive = zip::ZipArchive::new(cursor)?;
+    let mut archive = ZipArchive::new(cursor)?;
     archive.extract(&out_dir)?;
 
     Ok(out_dir)
