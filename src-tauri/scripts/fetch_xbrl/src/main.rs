@@ -54,6 +54,12 @@ enum Command {
         #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
         output: PathBuf,
     },
+    /// master.parquet のスキーマ（列名・型）を表示
+    Schema {
+        /// Parquetファイルパス
+        #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
+        input: PathBuf,
+    },
     /// 有価証券報告書（XBRL）を取得
     Fetch {
         /// 検索開始日 YYYY-MM-DD
@@ -179,6 +185,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Command::Schema { input } => run_schema(&input),
         Command::Master {
             jpx,
             codelist,
@@ -204,6 +211,27 @@ fn main() -> Result<()> {
             run_fetch(&api_key, &filter, from, to, &output, debug)
         }
     }
+}
+
+// ── schema サブコマンド ───────────────────────────────────
+
+fn run_schema(input: &PathBuf) -> Result<()> {
+    let file = std::fs::File::open(input)
+        .with_context(|| format!("ファイルを開けません: {}", input.display()))?;
+    let df = ParquetReader::new(file)
+        .finish()
+        .map_err(|e| anyhow::anyhow!("Parquet読み込み失敗: {}", e))?;
+
+    println!("ファイル: {}", input.display());
+    println!("行数: {}", df.height());
+    println!("{}", "─".repeat(40));
+    println!("{:<20} {}", "列名", "型");
+    println!("{}", "─".repeat(40));
+    for field in df.schema().iter_fields() {
+        println!("{:<20} {:?}", field.name(), field.dtype());
+    }
+    println!("{}", "─".repeat(40));
+    Ok(())
 }
 
 // ── master サブコマンド ───────────────────────────────────
