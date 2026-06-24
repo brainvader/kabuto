@@ -10,8 +10,6 @@ export interface StockSearchProps {
     onSelect: (item: Pick<StockItem, 'code' | 'name'>) => void
     /** 現在選択中の証券コード */
     selectedCode?: string
-    /** Tauri IPC を差し替えるためのフック（テスト用 DI） */
-    useSearch?: typeof useStockSearch
 }
 
 /**
@@ -21,9 +19,8 @@ export interface StockSearchProps {
 export function StockSearch({
     onSelect,
     selectedCode,
-    useSearch = useStockSearch,
 }: StockSearchProps) {
-    const { results, query, market, sector, isLoading, setQuery, setMarket, setSector } = useSearch()
+    const { results, query, market, sector, isLoading, setQuery, setMarket, setSector } = useStockSearch()
 
     const handleMarketClick = (m: string) => {
         setMarket(m === 'ALL' ? null : m)
