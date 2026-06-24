@@ -14,6 +14,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      "@tauri-apps/api/core": path.resolve(__dirname, "./src/__mocks__/api-core.ts"),
       "@": path.resolve(__dirname, "./src"),
       "@hooks": path.resolve(__dirname, "./src/hooks"),
       "@components": path.resolve(__dirname, "./src/components"),

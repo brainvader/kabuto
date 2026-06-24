@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 
-import { useStockSearch } from '@/hooks/useStockSearch'
+import { useStockSearch } from '@hooks/useStockSearch'
 
-// ── モック ──────────────────────────────────────────────────
+// __mocks__/api-core.ts を vi.mock で差し替え（返却値の制御のため）
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }))
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mockInvoke }))
 
@@ -12,8 +12,6 @@ const mockStocks = [
     { code: '5020', name: 'ENEOSホールディングス', market: 'プライム', sector: '石油・石炭製品' },
     { code: '7203', name: 'トヨタ自動車', market: 'プライム', sector: '輸送用機器' },
 ]
-
-// ── テスト ──────────────────────────────────────────────────
 
 describe('銘柄検索クエリを管理する', () => {
     beforeEach(() => {
