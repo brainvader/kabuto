@@ -5,7 +5,6 @@ import { fn } from 'storybook/test'
 import { StockSearch } from '@components/StockSearch'
 import { useStockSearch } from '@hooks/useStockSearch'
 
-// ── モック用フック ────────────────────────────────────────────
 type UseStockSearchReturn = ReturnType<typeof useStockSearch>
 
 const mockResults = [
@@ -28,13 +27,18 @@ const makeHook = (overrides: Partial<UseStockSearchReturn> = {}) => (): UseStock
     ...overrides,
 })
 
-// ── Meta ────────────────────────────────────────────────────
 const meta: Meta<typeof StockSearch> = {
     component: StockSearch,
     parameters: {
         layout: 'fullscreen',
-        backgrounds: { default: 'dark' },
     },
+    decorators: [
+        (Story) => (
+            <div style={{ width: "300px", height: "100vh", margin: "0 auto" }}>
+                <Story />
+            </div>
+        ),
+    ],
     args: {
         onSelect: fn(),
     },
@@ -43,16 +47,10 @@ const meta: Meta<typeof StockSearch> = {
 export default meta
 type Story = StoryObj<typeof StockSearch>
 
-// ── Stories ─────────────────────────────────────────────────
-
-/** 検索結果が表示されている状態 */
 export const Default: Story = {
-    args: {
-        useSearch: makeHook(),
-    },
+    args: { useSearch: makeHook() },
 }
 
-/** 銘柄が選択されている状態 */
 export const WithSelection: Story = {
     args: {
         useSearch: makeHook(),
@@ -60,25 +58,20 @@ export const WithSelection: Story = {
     },
 }
 
-/** ローディング中 */
 export const Loading: Story = {
     args: {
         useSearch: makeHook({ isLoading: true, results: [] }),
     },
 }
 
-/** 結果なし */
 export const Empty: Story = {
     args: {
         useSearch: makeHook({ results: [], query: 'zzz' }),
     },
 }
 
-/** 市場フィルターをクリックすると setMarket が呼ばれる */
 export const MarketFilter: Story = {
-    args: {
-        useSearch: makeHook(),
-    },
+    args: { useSearch: makeHook() },
     play: async ({ canvasElement, args }) => {
         const canvas = within(canvasElement)
         await userEvent.click(canvas.getByRole('button', { name: 'JPX' }))
@@ -86,11 +79,8 @@ export const MarketFilter: Story = {
     },
 }
 
-/** 結果アイテムをクリックすると onSelect が呼ばれる */
 export const SelectItem: Story = {
-    args: {
-        useSearch: makeHook(),
-    },
+    args: { useSearch: makeHook() },
     play: async ({ canvasElement, args }) => {
         const canvas = within(canvasElement)
         await userEvent.click(canvas.getByText('INPEX CORPORATION'))
