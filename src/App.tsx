@@ -1,15 +1,41 @@
-import { OntologyPanel } from "./components/OntologyPanel";
-import './App.css';
+import { StockSearch } from './components/StockSearch'
+import { useKabutoStore } from './store/useKabutoStore'
 
 function App() {
+  const setSelection = useKabutoStore((s) => s.setSelection)
+
   return (
-    <main style={{ background: '#111827', minHeight: '100vh', padding: '24px' }}>
-      <OntologyPanel
-        onIngestionComplete={() => console.log('完了')}
-        onIngestionError={(msg) => console.error(msg)}
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '300px 1fr',
+        gridTemplateRows: '1fr 240px',
+        height: '100vh',
+        background: '#09090b',
+        overflow: 'hidden',
+      }}
+    >
+      {/* CTX-1: Stock Search */}
+      <div
+        data-testid="stock-search-panel"
+        style={{ gridRow: '1 / 3', borderRight: '1px solid #1e2333', overflow: 'hidden' }}
+      >
+        <StockSearch onSelect={setSelection} />
+      </div>
+
+      {/* CTX-2: Pipeline Builder */}
+      <div
+        data-testid="pipeline-builder"
+        style={{ borderBottom: '1px solid #1e2333', overflow: 'hidden' }}
       />
-    </main>
-  );
+
+      {/* CTX-3: Metrics */}
+      <div
+        data-testid="metrics-panel"
+        style={{ overflow: 'hidden' }}
+      />
+    </div>
+  )
 }
 
-export default App;
+export default App
