@@ -399,7 +399,7 @@
         font-size: 9px;
       }
 
-      /* ─── CTX-1: STOCK SEARCH ─── */
+      /* ─── STOCK SEARCH ─── */
       #ctx-search {
         grid-row: 2;
       }
@@ -914,9 +914,9 @@
     </header>
 
     <!-- ════════════════════════════════════════════════════════════════
-         CTX-1: STOCK SEARCH
-         責務: 銘柄検索・フィルタリング・selection.id の更新
-         DB アクセス: Read only（FalkorDB Cypher Query）
+         STOCK SEARCH
+         責務: 銘柄検索・フィルタリング・selection.code の更新
+         DB アクセス: Read only（Tauri IPC → Polars-rs → master.parquet）
          operationPolicy: read → auto
 
          src/components/StockSearch.tsx
@@ -924,15 +924,17 @@
            [ ] 検索ボックスにコード・ティッカー・名前を入力すると結果リストが絞り込まれる
            [ ] 市場フィルター（ALL / JPX / NYSE / NASDAQ）で絞り込める
            [ ] セクターフィルターで絞り込める
-           [ ] 結果アイテムをクリックすると global-store の selection が更新される
+           [ ] 結果アイテムをクリックすると onSelect が code と name で呼ばれる
            [ ] 現在選択中のアイテムは selected スタイルで強調表示される
+           [ ] isLoading が true のときローディング表示になる
 
          src/hooks/useStockSearch.ts
          describe: 銘柄検索クエリを管理する
-           [ ] query が変わると FalkorDB に Cypher クエリを発行する
-           [ ] market / sector フィルターが変わると絞り込み条件を更新する
-           [ ] 結果は最大 50 件に制限する
-           [ ] query が空のとき最近選択した銘柄（履歴）を表示する
+           [ ] setQuery を呼ぶと invoke("search_stocks") が発行される
+           [ ] setMarket を呼ぶと market フィルター付きで invoke が発行される
+           [ ] setSector を呼ぶと sector フィルター付きで invoke が発行される
+           [ ] 結果は最大 50 件に制限される
+           [ ] query が空のとき invoke を発行しない
     ════════════════════════════════════════════════════════════════ -->
     <nav id="ctx-search" class="panel">
       <div class="panel-header">

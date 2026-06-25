@@ -36,3 +36,6 @@ script.sh
 
 #
 data/
+
+*storybook.log
+storybook-static
