@@ -1,6 +1,7 @@
 use anyhow::Result;
 use polars::prelude::*;
 use std::{fs, path::PathBuf};
+use unicode_normalization::UnicodeNormalization;
 
 /// 東証上場銘柄一覧（data_j.csv）と EDINETコードリストを結合して Parquet に保存する。
 ///
@@ -39,7 +40,17 @@ pub fn run(jpx_path: &PathBuf, codelist_path: &PathBuf, output_path: &PathBuf) -
         .with_column(col("コード").cast(DataType::String).alias("証券コード"))
         .select([
             col("証券コード"),
-            col("銘柄名"),
+            col("銘柄名")
+                .map(
+                    |s| {
+                        let ca = s.str()?;
+                        let normalized: StringChunked =
+                            ca.apply(|opt| opt.map(|s| s.nfkc().collect::<String>().into()));
+                        Ok(Some(normalized.into_column()))
+                    },
+                    GetOutput::same_type(),
+                )
+                .alias("銘柄名"),
             col("市場区分"),
             col("33業種区分"),
         ])

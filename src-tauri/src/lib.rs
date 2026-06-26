@@ -93,7 +93,6 @@ fn search_stocks(
     sector: Option<String>,
 ) -> Result<Vec<StockItem>, String> {
     let path = resolve_parquet_path().map_err(|e| e.to_string())?;
-
     let df =
         LazyFrame::scan_parquet(&path, ScanArgsParquet::default()).map_err(|e| e.to_string())?;
 
@@ -169,8 +168,9 @@ fn search_stocks(
 
 fn resolve_parquet_path() -> anyhow::Result<PathBuf> {
     let candidates = [
+        PathBuf::from("data/master.parquet"), // src-tauri/ 基準
         PathBuf::from("../data/master.parquet"),
-        PathBuf::from("data/master.parquet"),
+        PathBuf::from("src-tauri/data/master.parquet"),
     ];
     for p in &candidates {
         if p.exists() {
