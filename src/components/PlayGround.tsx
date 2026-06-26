@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useKabutoStore } from '../store/useKabutoStore'
 
 type Tab = 'GRAPH' | 'RESULT'
 
@@ -9,6 +10,7 @@ type Tab = 'GRAPH' | 'RESULT'
  */
 export function PlayGround() {
     const [activeTab, setActiveTab] = useState<Tab>('GRAPH')
+    const selection = useKabutoStore((s) => s.selection)
 
     return (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -39,15 +41,49 @@ export function PlayGround() {
                 ))}
             </div>
 
-            {/* コンテンツ */}
+            {/* GRAPH タブ */}
             {activeTab === 'GRAPH' && (
                 <div
                     data-testid="playground-canvas"
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#374151', fontSize: 12, fontFamily: 'monospace' }}
+                    style={{ flex: 1, position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f1117' }}
                 >
-                    GRAPH AREA
+                    {selection === null ? (
+                        <div
+                            data-testid="playground-empty"
+                            style={{ color: '#374151', fontSize: 12, fontFamily: 'monospace' }}
+                        >
+                            銘柄を選択してください
+                        </div>
+                    ) : (
+                        <div
+                            data-testid="node-company"
+                            style={{
+                                background: '#1e3a5f',
+                                border: '2px solid #3b82f6',
+                                borderRadius: 8,
+                                padding: '16px 24px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                alignItems: 'center',
+                                gap: 6,
+                                minWidth: 120,
+                            }}
+                        >
+                            <span style={{ fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: '#3b82f6', textTransform: 'uppercase' }}>
+                                company
+                            </span>
+                            <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 700, color: '#e8eaf0' }}>
+                                {selection.code}
+                            </span>
+                            <span style={{ fontSize: 11, color: '#6b7280' }}>
+                                {selection.name}
+                            </span>
+                        </div>
+                    )}
                 </div>
             )}
+
+            {/* RESULT タブ */}
             {activeTab === 'RESULT' && (
                 <div
                     data-testid="playground-result"
