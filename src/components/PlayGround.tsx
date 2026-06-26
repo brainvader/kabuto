@@ -1,5 +1,4 @@
-import { useEffect, useMemo } from 'react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
     ReactFlow,
     Background,
@@ -9,42 +8,10 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { useKabutoStore } from '@/store/useKabutoStore'
+import { nodeTypes } from '@/components/nodes/nodeTypes'
+import type { CompanyNodeData } from '@/components/nodes/CompanyNode'
 
 type Tab = 'GRAPH' | 'RESULT'
-
-// ── カスタムノード: company ───────────────────────────────────────────────────
-
-function CompanyNode({ data }: { data: { code: string; name: string } }) {
-    return (
-        <div
-            style={{
-                background: '#1e3a5f',
-                border: '2px solid #3b82f6',
-                borderRadius: 8,
-                padding: '16px 24px',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
-                minWidth: 120,
-            }}
-        >
-            <span style={{ fontFamily: 'monospace', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', color: '#3b82f6', textTransform: 'uppercase' }}>
-                company
-            </span>
-            <span style={{ fontFamily: 'monospace', fontSize: 18, fontWeight: 700, color: '#e8eaf0' }}>
-                {data.code}
-            </span>
-            <span style={{ fontSize: 11, color: '#6b7280' }}>
-                {data.name}
-            </span>
-        </div>
-    )
-}
-
-const nodeTypes = { company: CompanyNode }
-
-// ── PlayGround ────────────────────────────────────────────────────────────────
 
 /**
  * PlayGround パネル
@@ -55,7 +22,7 @@ export function PlayGround() {
     const [activeTab, setActiveTab] = useState<Tab>('GRAPH')
     const selection = useKabutoStore((s) => s.selection)
 
-    const nodes: Node[] = useMemo(() => {
+    const nodes: Node<CompanyNodeData>[] = useMemo(() => {
         if (!selection) return []
         return [
             {
