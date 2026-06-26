@@ -239,40 +239,44 @@ fn run_schema(input: &PathBuf) -> Result<()> {
 fn run_master(jpx_path: &PathBuf, codelist_path: &PathBuf, output_path: &PathBuf) -> Result<()> {
     println!("JPX銘柄一覧を読み込み中: {}", jpx_path.display());
 
-    // JPX CSV 読み込み
-    // 列: 日付,コード,銘柄名,市場・商品区分,33業種コード,33業種区分,17業種コード,17業種区分,規模コード,規模区分
     let jpx = CsvReadOptions::default()
         .with_has_header(true)
-        .with_infer_schema_length(Some(10))
+        .with_infer_schema_length(Some(0))
         .try_into_reader_with_file_path(Some(jpx_path.clone()))?
         .finish()
-        .map_err(|e| anyhow::anyhow!("JPX CSV読み込み失敗: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("data_j.csv 読み込み失敗: {}", e))?;
 
-    println!("  → {} 件", jpx.height());
+    println!("  → {} 件（フィルタ前）", jpx.height());
 
-    // コード列を文字列に統一（4桁ゼロ埋め）
+    // 個別株のみ抽出（ETF・ETN・REIT 等を除外）
+    // 市場区分を正規化: "プライム（内国株式）" → "プライム"
     let jpx = jpx
         .lazy()
+        .filter(col("市場・商品区分").str().contains(lit("内国株式"), true))
+        .with_column(
+            col("市場・商品区分")
+                .str()
+                .replace_all(lit("（内国株式）"), lit(""), true)
+                .alias("市場区分"),
+        )
         .with_column(col("コード").cast(DataType::String).alias("証券コード"))
         .select([
             col("証券コード"),
             col("銘柄名"),
-            col("市場・商品区分").alias("市場区分"),
+            col("市場区分"),
             col("33業種区分"),
-            col("17業種区分"),
-            col("規模区分"),
         ])
         .collect()
         .map_err(|e| anyhow::anyhow!("JPX変換失敗: {}", e))?;
 
+    println!("  → {} 件（個別株のみ）", jpx.height());
+
+    // EDINETコードリスト読み込み
     println!(
         "EDINETコードリストを読み込み中: {}",
         codelist_path.display()
     );
 
-    // EDINETコードリスト読み込み（1行目はヘッダー情報なのでスキップ）
-    // 列: EDINETコード,提出者種別,上場区分,連結の有無,資本金,決算日,提出者名,...,証券コード,提出者法人番号
-    // 証券コードは "409A0" のような英数字混在があるため全列Stringで読んでからcast
     let codelist = CsvReadOptions::default()
         .with_has_header(true)
         .with_skip_rows(1)
@@ -294,7 +298,7 @@ fn run_master(jpx_path: &PathBuf, codelist_path: &PathBuf, output_path: &PathBuf
         .collect()
         .map_err(|e| anyhow::anyhow!("EDINET変換失敗: {}", e))?;
 
-    // 結合: 証券コードをキーにinner join
+    // 結合: 証券コードをキーに left join
     println!("結合中...");
     let master = jpx
         .lazy()
@@ -309,7 +313,7 @@ fn run_master(jpx_path: &PathBuf, codelist_path: &PathBuf, output_path: &PathBuf
 
     println!("  → {} 件", master.height());
 
-    // Parquet出力
+    // Parquet 出力
     if let Some(parent) = output_path.parent() {
         fs::create_dir_all(parent)?;
     }
