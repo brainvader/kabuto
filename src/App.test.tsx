@@ -5,7 +5,6 @@ import React from 'react'
 import App from './App'
 import { useKabutoStore } from './store/useKabutoStore'
 
-// ── モック ──────────────────────────────────────────────────────────────────
 const { mockOnSelect } = vi.hoisted(() => ({ mockOnSelect: vi.fn() }))
 
 vi.mock('./components/StockSearch', () => ({
@@ -15,12 +14,14 @@ vi.mock('./components/StockSearch', () => ({
     },
 }))
 
+vi.mock('./components/PlayGround', () => ({
+    PlayGround: () => React.createElement('div', { 'data-testid': 'playground' }),
+}))
+
 beforeEach(() => {
     useKabutoStore.setState({ selection: null, pipeline: { status: 'idle', activeId: null } })
     mockOnSelect.mockReset()
 })
-
-// ── レイアウト ───────────────────────────────────────────────────────────────
 
 describe('App レイアウト', () => {
     it('StockSearch パネルが表示される', () => {
@@ -28,9 +29,9 @@ describe('App レイアウト', () => {
         expect(screen.getByTestId('stock-search')).toBeInTheDocument()
     })
 
-    it('Pipeline Builder パネルが表示される', () => {
+    it('PlayGround パネルが表示される', () => {
         render(<App />)
-        expect(screen.getByTestId('pipeline-builder')).toBeInTheDocument()
+        expect(screen.getByTestId('playground-panel')).toBeInTheDocument()
     })
 
     it('Metrics パネルが表示される', () => {
@@ -38,8 +39,6 @@ describe('App レイアウト', () => {
         expect(screen.getByTestId('metrics-panel')).toBeInTheDocument()
     })
 })
-
-// ── StockSearch → useKabutoStore 連携 ────────────────────────────────────────
 
 describe('StockSearch → store 連携', () => {
     it('onSelect が呼ばれると selection が更新される', () => {

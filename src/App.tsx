@@ -1,4 +1,5 @@
 import { StockSearch } from './components/StockSearch'
+import { PlayGround } from './components/PlayGround'
 import { useKabutoStore } from './store/useKabutoStore'
 
 function App() {
@@ -23,11 +24,13 @@ function App() {
         <StockSearch onSelect={setSelection} />
       </div>
 
-      {/* CTX-2: Pipeline Builder */}
+      {/* PlayGround */}
       <div
-        data-testid="pipeline-builder"
+        data-testid="playground-panel"
         style={{ borderBottom: '1px solid #1e2333', overflow: 'hidden' }}
-      />
+      >
+        <PlayGround />
+      </div>
 
       {/* CTX-3: Metrics */}
       <div

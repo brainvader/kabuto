@@ -279,8 +279,8 @@
         grid-row: 2 / 4;
       }
 
-      /* ── CTX-2: PIPELINE BUILDER ── */
-      #pipeline-builder {
+      /* ── CTX-2: PIPELINE GRAPH ── */
+      #playground {
         grid-column: 2;
         grid-row: 2;
       }
@@ -589,13 +589,13 @@
     </aside>
 
     <!-- ════════════════════════════════════════════════════
-         CTX-2: PIPELINE BUILDER
+         CTX-2: PIPELINE GRAPH
          src/components/PipelineBuilder.tsx
          src/hooks/usePipelineBuilder.ts
          DB: SurrealDB（SOURCE ノードが SurrealQL を発行）
              Parquet（CALC ノードが Polars-rs を呼ぶ）
 
-         [Feature] BUILDER / RESULT タブを切り替える
+         [Feature] GRAPH / RESULT タブを切り替える
          [Feature] ノードパレットから SOURCE / FILTER / CALC / OUTPUT を追加する
          [Feature] ノードをドラッグ＆ドロップで配置する
          [Feature] 型が合うポート間のみエッジ接続を許可する（オントロジー制約）
@@ -609,24 +609,24 @@
            OUTPUT  → チャート / テーブル / 仮説採否    in: MetricResult out: Visualization
 
          local state:
-           activeTab: "BUILDER"
+           activeTab: "GRAPH"
            nodes: []
            edges: []
            isRunning: false
     ════════════════════════════════════════════════════════ -->
-    <main id="pipeline-builder" class="panel">
+    <main id="playground" class="panel">
       <div class="panel-header">
-        <span class="panel-title">Pipeline Builder</span>
+        <span class="panel-title">PlayGround</span>
         <span class="badge badge-version">@xyflow/react</span>
       </div>
 
       <div class="tab-bar">
-        <button class="tab active">BUILDER</button>
+        <button class="tab active">GRAPH</button>
         <button class="tab">RESULT</button>
       </div>
 
-      <!-- BUILDER キャンバス（サンプル: 石油感応度分析） -->
-      <div class="canvas-area" data-testid="pipeline-canvas">
+      <!-- GRAPH キャンバス（サンプル: 石油感応度分析） -->
+      <div class="canvas-area" data-testid="playground-canvas">
 
         <svg class="pipe-edges" viewBox="0 0 900 400" preserveAspectRatio="none">
           <!-- SOURCE → FILTER -->
