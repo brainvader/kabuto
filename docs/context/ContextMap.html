@@ -2,148 +2,90 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <title>ContextMap: Kabuto</title>
+    <title>KABUTO — Context Map (SurrealDB Edition)</title>
 
-    <!-- ============================================================
-         STACK
-         runtime:  Tauri 2
-         frontend: React 19 + TypeScript + Vite
-         router:   なし（単一ページ）
-         state:    Zustand
-         validation: Zod
-         ui:       shadcn/ui + Tailwind CSS v4
-         icons:    lucide-react
-         graph:    @xyflow/react
-         db:       FalkorDB (Tauri Rust bridge)
-         compute:  Polars-rs (Tauri Rust bridge)
-         ai:       Gemini function_calling, temperature=0
-         testing:  Vitest + RTL + Storybook + Playwright
-         package:  pnpm
-    ============================================================ -->
-
-    <!-- ============================================================
-         GLOBAL STORE (Zustand)
-         複数のコンテキストをまたいで共有すべき状態のみを定義する。
-
-         設計方針:
-         - FalkorDB = 事実（JPXデータ・銘柄属性）。シミュレーションで変更しない。
-         - シミュレーション結果 = reports/ にファイル出力。Write back なし。
-         - execution.mode が ctx-graph のレンダリングモードを制御する。
-         - operationPolicy で操作の危険度を分類する。
-           read         → 承認不要（自動実行）
-           simulation   → CoT表示 + ユーザー承認
-           fact_write   → 確認ダイアログ必須
-         - Gemini は actionRegistry + pipelineRegistry を tools として参照する。
-    ============================================================ -->
+    <!-- ================================================================
+         GLOBAL STORE
+         src/store/useKabutoStore.ts
+         - selection: { code, name } | null   ← 証券コードが全コンテキストの共有キー
+         - pipeline: { status, activeId }
+         ================================================================ -->
     <script id="global-store" type="application/json">
       {
-        "selection": { "id": "1605", "type": "Company", "name": "INPEX" },
-        "execution": { "status": "idle", "mode": "GRAPH" },
-        "operationPolicy": {
-          "read": "auto",
-          "simulation": "requires_approval",
-          "fact_write": "requires_confirmation"
-        },
-        "actionRegistry": {
-          "stress_test": {
-            "when": "外部ショックが特定企業に与える影響を見たい時",
-            "input": ["selection_id", "variable", "delta"],
-            "output": ["impact_score", "affected_nodes"],
-            "executor": "execute_script",
-            "script": "scripts/stress_test.py",
-            "writes_to": "simulation",
-            "policy": "simulation"
-          },
-          "valuation_dcf": {
-            "when": "企業の理論株価を算出したい時",
-            "input": ["selection_id", "discount_rate", "forecast_years"],
-            "output": ["fair_value", "upside_pct"],
-            "executor": "execute_script",
-            "script": "scripts/valuation_dcf.py",
-            "writes_to": "simulation",
-            "policy": "simulation"
-          },
-          "risk_scan": {
-            "when": "ポートフォリオ全体のリスク分布を把握したい時",
-            "input": ["selection_ids", "risk_factors"],
-            "output": ["risk_matrix", "top_exposures"],
-            "executor": "execute_script",
-            "script": "scripts/risk_scan.py",
-            "writes_to": "simulation",
-            "policy": "simulation"
-          },
-          "run_pipeline": {
-            "when": "登録済みの分析パイプラインを実行したい時",
-            "input": ["pipeline_id", "selection_id"],
-            "output": ["report_path"],
-            "executor": "pipeline_runner",
-            "writes_to": "simulation",
-            "policy": "simulation"
-          }
-        },
-        "pipelineRegistry": {
-          "oil_sensitivity": {
-            "label": "原油感応度分析",
-            "description": "原油価格の上下変動が対象企業に与える影響を分析する",
-            "steps": [
-              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": 0.1 } },
-              { "action": "stress_test", "args": { "variable": "crude_oil", "delta": -0.1 } }
-            ],
-            "input": ["selection_id"],
-            "output": "reports/pipeline/"
-          }
-        }
+        "selection": null,
+        "pipeline": { "status": "idle", "activeId": null }
       }
     </script>
 
-    <!-- src/store/useKabutoStore.ts のローカル初期値はグローバルストアが提供する -->
+    <!-- ================================================================
+         DATA ARCHITECTURE
+         ┌─────────────────────────────────────────────────────────────┐
+         │  SurrealDB (file:kabuto.db)  ← シングルバイナリ、ネットワーク不要  │
+         │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
+         │  │ Graph層       │  │ Vector層      │  │ Document層        │  │
+         │  │ Company      │  │ XBRL自然言語  │  │ パイプライン定義   │  │
+         │  │ MacroIndicator│  │ Embedding    │  │ 検証結果          │  │
+         │  │ FinancialMetric│ │ <|COSINE|>  │  │                  │  │
+         │  │ BusinessRisk  │  │             │  │                  │  │
+         │  │ MarketEvent   │  │             │  │                  │  │
+         │  └──────────────┘  └──────────────┘  └──────────────────┘  │
+         │  ↑ 単一クエリで Graph探索＋Vector検索＋フィルターを合成        │
+         └─────────────────────────────────────────────────────────────┘
+         ┌─────────────────────────────────────────────────────────────┐
+         │  Parquet (price.parquet / master.parquet)                   │
+         │  株価時系列・銘柄マスタ ← Polars-rs で計算 (Tauri command)    │
+         └─────────────────────────────────────────────────────────────┘
+         共有キー: 証券コード（code）
+         SurrealDB ノード例: company:1605  macro:WTI  risk:supply_shortage
+         ================================================================ -->
 
-    <!-- ctx-search のローカル状態 -->
-    <script data-context="ctx-search" class="local-state" type="application/json">
-      {
-        "query": "",
-        "marketFilter": "ALL",
-        "sectorFilter": null,
-        "results": [],
-        "recentSelections": []
-      }
-    </script>
+    <!-- ================================================================
+         SURREAL DB スキーマ概要
+         Node types:
+           company:{ code, name, sector, market, listed, country }
+           macro:{ id, name, category, source }
+             category: COMMODITY | INTEREST_RATE | INDEX | CURRENCY
+           financial_metric:{ company, name, value, unit, period, source:"xbrl" }
+           business_risk:{ company, description, category, confidence, source:"llm" }
+           market_event:{ name, date, category }
 
-    <!-- pipeline-builder のローカル状態 -->
-    <script data-context="pipeline-builder" class="local-state" type="application/json">
-      {
-        "activeTab": "BUILDER",
-        "nodes": [],
-        "edges": [],
-        "results": {},
-        "isRunning": false
-      }
-    </script>
+         Edge types (RELATE構文):
+           company->AFFECTED_BY->macro    { direction, confidence, confirmed, lag_days }
+           company->HAS_METRIC->financial_metric
+           company->HAS_RISK->business_risk
+           company->INVESTED_IN->company  { ratio }
+           macro->CORRELATES_WITH->macro
 
-    <!-- ctx-metrics のローカル状態 -->
-    <script data-context="ctx-metrics" class="local-state" type="application/json">
-      {
-        "period": "1Y",
-        "simulationReportPath": null
-      }
-    </script>
+         クエリ例（石油問題 → 関連企業の発見）:
+           SELECT code, name,
+                  vector::distance::knn() AS relevance
+           FROM company
+           WHERE id IN macro:WTI->AFFECTED_BY<-company
+             AND listed = true
+             AND embedding <|100,COSINE|> $query_embedding
+           ORDER BY relevance DESC
+           LIMIT 20
+         ================================================================ -->
 
-    <!-- ============================================================
-         UI DATA FLOWS（コンテキスト間のデータフロー）
-         node_click       pipeline-builder → global-store: selection.id を更新
-         selection_change global-store → ctx-metrics: selection を配信
-         pipeline_saved   pipeline-builder → pipelineRegistry: パイプライン定義を登録
-         pipeline_result  pipeline-builder → ctx-metrics: 結果データを渡す
-    ============================================================ -->
+    <!-- ================================================================
+         PIPELINE ノード種別（オントロジー）
+           SOURCE   : SurrealDB クエリ発行 / Parquet 読み込み
+                      入力型: QueryParams  出力型: StockList | TimeSeries
+           FILTER   : 条件絞り込み（セクター・期間・閾値）
+                      入力型: StockList    出力型: StockList
+           CALC     : Polars による相関・リターン・因果検定
+                      入力型: TimeSeries   出力型: MetricResult
+           OUTPUT   : チャート / テーブル / 仮説採否フラグ
+                      入力型: MetricResult 出力型: Visualization
+         型が合わないエッジは接続不可（オントロジー制約）
+         ================================================================ -->
 
     <style>
       :root {
-        --background: #09090b;
+        --bg: #09090b;
         --card: #0f1117;
-        --card-border: #1c1f2e;
         --panel: #13161f;
         --muted: #1e2231;
-        --muted-fg: #4b5263;
         --border: #1e2333;
         --input: #1a1d2a;
 
@@ -156,173 +98,132 @@
         --emerald: #10b981;
         --emerald-dim: #064e35;
         --amber: #f59e0b;
-        --amber-dim: #451a00;
-        --red: #ef4444;
-        --red-dim: #450a0a;
+        --amber-dim: #451a03;
         --violet: #8b5cf6;
         --violet-dim: #2e1065;
+        --red: #ef4444;
 
         --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-        --font-sans: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
+        --font-sans: 'Inter', system-ui, sans-serif;
         --radius: 4px;
       }
 
-      *,
-      *::before,
-      *::after {
+      * {
         box-sizing: border-box;
         margin: 0;
         padding: 0;
       }
 
-      html,
       body {
-        height: 100%;
-        overflow: hidden;
-      }
-
-      body {
-        background: var(--background);
+        background: var(--bg);
         color: var(--fg);
         font-family: var(--font-sans);
-        font-size: 13px;
+        font-size: 12px;
+        height: 100vh;
         display: grid;
         grid-template-columns: 300px 1fr;
-        grid-template-rows: 52px 1fr 240px;
-        height: 100vh;
+        grid-template-rows: 36px 1fr 200px;
+        overflow: hidden;
       }
 
+      /* ── HEADER ── */
       header {
         grid-column: 1 / -1;
-        background: var(--card);
-        border-bottom: 1px solid var(--card-border);
-        display: flex;
-        align-items: center;
-        padding: 0 20px;
-        gap: 24px;
-        justify-content: space-between;
-        z-index: 50;
-      }
-
-      .header-brand {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-      }
-
-      .header-logo {
-        font-family: var(--font-mono);
-        font-size: 15px;
-        font-weight: 700;
-        letter-spacing: 0.15em;
-        color: var(--fg);
-      }
-
-      .header-logo span {
-        color: var(--accent);
-      }
-
-      .badge {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        padding: 2px 8px;
-        border-radius: 2px;
-        font-family: var(--font-mono);
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-
-      .badge-green {
-        background: var(--emerald-dim);
-        color: var(--emerald);
-        border: 1px solid #065f46;
-      }
-
-      .badge-blue {
-        background: var(--accent-dim);
-        color: var(--accent);
-        border: 1px solid #1e40af;
-      }
-
-      .badge-amber {
-        background: var(--amber-dim);
-        color: var(--amber);
-        border: 1px solid #78350f;
-      }
-
-      .badge-red {
-        background: var(--red-dim);
-        color: var(--red);
-        border: 1px solid #7f1d1d;
-      }
-
-      .badge-muted {
-        background: var(--muted);
-        color: var(--fg-dim);
-        border: 1px solid var(--border);
-      }
-
-      .dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: currentColor;
-      }
-
-      .header-right {
-        display: flex;
-        align-items: center;
-        gap: 12px;
-      }
-
-      .selection-chip {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 4px 12px;
-        background: var(--muted);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-      }
-
-      .selection-chip .ticker {
-        font-family: var(--font-mono);
-        font-size: 13px;
-        font-weight: 700;
-        color: var(--accent);
-      }
-
-      .selection-chip .name {
-        font-size: 12px;
-        color: var(--fg-dim);
-      }
-
-      .selection-chip .price {
-        font-family: var(--font-mono);
-        font-size: 12px;
-        color: var(--emerald);
-      }
-
-      .panel {
-        background: var(--card);
-        border: 1px solid var(--card-border);
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        margin: 3px;
-        border-radius: var(--radius);
-      }
-
-      .panel-header {
-        padding: 8px 14px;
+        grid-row: 1;
         background: var(--panel);
         border-bottom: 1px solid var(--border);
         display: flex;
         align-items: center;
+        gap: 12px;
+        padding: 0 14px;
+      }
+
+      .logo {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        color: var(--fg);
+      }
+
+      .logo span {
+        color: var(--accent);
+      }
+
+      .badge {
+        font-family: var(--font-mono);
+        font-size: 9px;
+        font-weight: 700;
+        padding: 2px 6px;
+        border-radius: 2px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .badge-version {
+        background: var(--muted);
+        color: var(--fg-dim);
+      }
+
+      .badge-db-ok {
+        background: var(--emerald-dim);
+        color: var(--emerald);
+      }
+
+      .badge-db-err {
+        background: #3f1f1f;
+        color: var(--red);
+      }
+
+      .badge-idle {
+        background: var(--muted);
+        color: var(--fg-dim);
+      }
+
+      .badge-running {
+        background: var(--accent-dim);
+        color: var(--accent);
+      }
+
+      .header-sep {
+        width: 1px;
+        height: 18px;
+        background: var(--border);
+      }
+
+      .selection-chip {
+        background: var(--accent-dim);
+        border: 1px solid var(--accent);
+        border-radius: var(--radius);
+        padding: 2px 8px;
+        font-family: var(--font-mono);
+        font-size: 10px;
+        color: var(--accent);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      .selection-chip .price {
+        color: var(--emerald);
+      }
+
+      /* ── PANELS ── */
+      .panel {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border-right: 1px solid var(--border);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .panel-header {
+        display: flex;
+        align-items: center;
         justify-content: space-between;
+        padding: 6px 12px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
         flex-shrink: 0;
       }
 
@@ -330,232 +231,105 @@
         font-family: var(--font-mono);
         font-size: 9px;
         font-weight: 700;
-        letter-spacing: 0.15em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
         color: var(--fg-dim);
       }
 
-      .panel-actions {
+      .feature-list {
+        padding: 10px 12px;
         display: flex;
-        align-items: center;
-        gap: 6px;
-      }
-
-      .panel-body {
-        flex: 1;
-        overflow-y: auto;
-        padding: 12px;
-        scrollbar-width: thin;
-        scrollbar-color: var(--muted) transparent;
-      }
-
-      .btn {
-        display: inline-flex;
-        align-items: center;
+        flex-direction: column;
         gap: 5px;
-        padding: 5px 10px;
-        border-radius: var(--radius);
-        border: 1px solid transparent;
-        font-family: var(--font-mono);
-        font-size: 10px;
-        font-weight: 600;
-        letter-spacing: 0.05em;
-        cursor: pointer;
-        white-space: nowrap;
+        overflow-y: auto;
       }
 
-      .btn-primary {
-        background: var(--accent);
-        color: #fff;
-        border-color: var(--accent);
+      .feature-item {
+        color: var(--accent);
+        font-size: 11px;
+        line-height: 1.5;
+        padding-left: 10px;
+        border-left: 2px solid var(--accent-dim);
       }
 
-      .btn-outline {
-        background: transparent;
-        color: var(--fg-dim);
-        border-color: var(--border);
+      .feature-item.db {
+        color: var(--emerald);
+        border-left-color: var(--emerald-dim);
       }
 
-      .btn-ghost {
-        background: transparent;
-        color: var(--fg-dim);
-        border: none;
+      .feature-item.calc {
+        color: var(--amber);
+        border-left-color: var(--amber-dim);
       }
 
-      .btn-emerald {
-        background: var(--emerald);
-        color: #000;
-        font-weight: 700;
-      }
-
-      .btn-danger {
-        background: var(--red-dim);
-        color: var(--red);
-        border-color: var(--red);
-      }
-
-      .btn-sm {
-        padding: 3px 7px;
+      .feature-label {
         font-size: 9px;
+        font-family: var(--font-mono);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        opacity: 0.7;
+        display: block;
+        margin-bottom: 1px;
       }
 
-      /* ─── STOCK SEARCH ─── */
+      /* ── CTX-1: STOCK SEARCH ── */
       #ctx-search {
+        grid-column: 1;
+        grid-row: 2 / 4;
+      }
+
+      /* ── CTX-2: PIPELINE BUILDER ── */
+      #pipeline-builder {
+        grid-column: 2;
         grid-row: 2;
       }
 
-      .search-box-wrap {
-        padding: 10px 12px;
+      .tab-bar {
+        display: flex;
+        gap: 2px;
+        padding: 6px 10px;
         background: var(--panel);
         border-bottom: 1px solid var(--border);
-        flex-shrink: 0;
       }
 
-      .search-input {
-        width: 100%;
-        background: var(--input);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 6px 10px;
-        font-family: var(--font-mono);
-        font-size: 12px;
-        color: var(--fg);
-        outline: none;
-      }
-
-      .search-input::placeholder {
-        color: var(--fg-subtle);
-      }
-
-      .search-input:focus {
-        border-color: var(--accent);
-      }
-
-      .filter-row {
-        display: flex;
-        gap: 4px;
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border);
-        flex-wrap: wrap;
-        flex-shrink: 0;
-      }
-
-      .filter-chip {
-        padding: 2px 8px;
-        border-radius: 2px;
-        font-family: var(--font-mono);
-        font-size: 9px;
-        font-weight: 600;
-        letter-spacing: 0.06em;
-        cursor: pointer;
-        border: 1px solid var(--border);
-        color: var(--fg-dim);
-        background: transparent;
-      }
-
-      .filter-chip.active {
-        background: var(--accent-dim);
-        color: var(--accent);
-        border-color: var(--accent);
-      }
-
-      .result-list {
-        display: flex;
-        flex-direction: column;
-      }
-
-      .result-item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 8px 12px;
-        border-bottom: 1px solid var(--border);
-        cursor: pointer;
-        gap: 8px;
-      }
-
-      .result-item:hover {
-        background: var(--muted);
-      }
-
-      .result-item.selected {
-        background: var(--accent-dim);
-        border-left: 2px solid var(--accent);
-      }
-
-      .result-item-left {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        min-width: 0;
-      }
-
-      .result-ticker {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 700;
-        color: var(--accent);
-      }
-
-      .result-name {
-        font-size: 11px;
-        color: var(--fg-dim);
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 160px;
-      }
-
-      .result-item-right {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 2px;
-        flex-shrink: 0;
-      }
-
-      .result-price {
-        font-family: var(--font-mono);
-        font-size: 11px;
-        font-weight: 700;
-        color: var(--fg);
-      }
-
-      .result-change {
-        font-family: var(--font-mono);
-        font-size: 10px;
-      }
-
-      /* ─── PIPELINE BUILDER ─── */
-      #pipeline-builder {
-        grid-row: 2;
-      }
-
-      .mode-tabs {
-        display: flex;
-        gap: 2px;
-      }
-
-      .mode-tab {
+      .tab {
         padding: 3px 10px;
         border-radius: 2px;
         font-family: var(--font-mono);
         font-size: 9px;
         font-weight: 700;
         letter-spacing: 0.08em;
+        text-transform: uppercase;
         cursor: pointer;
         border: 1px solid transparent;
         color: var(--fg-dim);
         background: transparent;
       }
 
-      .mode-tab.active {
+      .tab.active {
         background: var(--accent-dim);
         color: var(--accent);
         border-color: var(--accent);
       }
 
-      /* パイプラインノード */
+      .canvas-area {
+        flex: 1;
+        position: relative;
+        background: radial-gradient(ellipse 80% 60% at 50% 40%, #1e2a4020 0%, transparent 70%), var(--card);
+        overflow: hidden;
+      }
+
+      .canvas-area::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background-image: radial-gradient(circle, var(--fg-subtle) 0.5px, transparent 0.5px);
+        background-size: 28px 28px;
+        opacity: 0.25;
+      }
+
+      /* Pipeline ノード */
       .pipe-node {
         position: absolute;
         background: var(--panel);
@@ -564,27 +338,10 @@
         padding: 6px 10px;
         font-family: var(--font-mono);
         font-size: 10px;
-        cursor: grab;
-        min-width: 110px;
+        min-width: 130px;
         display: flex;
         flex-direction: column;
         gap: 3px;
-      }
-
-      .pipe-node:hover {
-        border-color: var(--fg-dim);
-      }
-
-      .pipe-node.node-source {
-        border-color: var(--emerald);
-      }
-
-      .pipe-node.node-transform {
-        border-color: var(--accent);
-      }
-
-      .pipe-node.node-output {
-        border-color: var(--amber);
       }
 
       .pipe-node-label {
@@ -592,18 +349,6 @@
         font-weight: 700;
         letter-spacing: 0.1em;
         text-transform: uppercase;
-      }
-
-      .pipe-node.node-source .pipe-node-label {
-        color: var(--emerald);
-      }
-
-      .pipe-node.node-transform .pipe-node-label {
-        color: var(--accent);
-      }
-
-      .pipe-node.node-output .pipe-node-label {
-        color: var(--amber);
       }
 
       .pipe-node-name {
@@ -615,6 +360,14 @@
       .pipe-node-param {
         color: var(--fg-dim);
         font-size: 9px;
+      }
+
+      .pipe-node-type {
+        font-size: 8px;
+        color: var(--fg-subtle);
+        border-top: 1px solid var(--border);
+        margin-top: 2px;
+        padding-top: 2px;
       }
 
       .pipe-port {
@@ -638,157 +391,68 @@
         transform: translateY(-50%);
       }
 
-      .pipe-node.node-source .pipe-port {
+      /* ノード種別カラー */
+      .node-source {
         border-color: var(--emerald);
       }
 
-      .pipe-node.node-transform .pipe-port {
+      .node-source .pipe-node-label {
+        color: var(--emerald);
+      }
+
+      .node-source .pipe-port {
+        border-color: var(--emerald);
+      }
+
+      .node-filter {
+        border-color: var(--violet);
+      }
+
+      .node-filter .pipe-node-label {
+        color: var(--violet);
+      }
+
+      .node-filter .pipe-port {
+        border-color: var(--violet);
+      }
+
+      .node-calc {
         border-color: var(--accent);
       }
 
-      .pipe-node.node-output .pipe-port {
+      .node-calc .pipe-node-label {
+        color: var(--accent);
+      }
+
+      .node-calc .pipe-port {
+        border-color: var(--accent);
+      }
+
+      .node-output {
         border-color: var(--amber);
       }
 
-      /* RESULTタブ */
-      .result-panel {
-        flex: 1;
-        overflow-y: auto;
-        padding: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
+      .node-output .pipe-node-label {
+        color: var(--amber);
       }
 
-      .result-block {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        overflow: hidden;
+      .node-output .pipe-port {
+        border-color: var(--amber);
       }
 
-      .result-block-header {
-        padding: 5px 10px;
-        background: var(--muted);
-        border-bottom: 1px solid var(--border);
-        font-family: var(--font-mono);
-        font-size: 9px;
-        font-weight: 700;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-      }
-
-      .result-block-body {
-        padding: 10px 12px;
-      }
-
-      .graph-canvas {
-        flex: 1;
-        position: relative;
-        overflow: hidden;
-        background: radial-gradient(ellipse 80% 60% at 50% 40%, #1e2a4020 0%, transparent 70%), var(--card);
-      }
-
-      .graph-canvas::before {
-        content: '';
-        position: absolute;
-        inset: 0;
-        background-image: radial-gradient(circle, var(--muted-fg) 0.5px, transparent 0.5px);
-        background-size: 28px 28px;
-        opacity: 0.25;
-      }
-
-      .graph-node {
-        position: absolute;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: var(--font-mono);
-        font-weight: 700;
-        cursor: pointer;
-      }
-
-      .node-company {
-        width: 52px;
-        height: 52px;
-        background: var(--accent-dim);
-        border: 2px solid var(--accent);
-        color: var(--accent);
-        font-size: 9px;
-      }
-
-      .node-company.selected {
-        background: var(--accent);
-        color: #fff;
-        box-shadow: 0 0 20px #3b82f680;
-      }
-
-      .node-sector {
-        width: 40px;
-        height: 40px;
-        background: var(--violet-dim);
-        border: 1.5px solid var(--violet);
-        color: var(--violet);
-        font-size: 8px;
-      }
-
-      .node-index {
-        width: 34px;
-        height: 34px;
-        background: var(--emerald-dim);
-        border: 1.5px solid var(--emerald);
-        color: var(--emerald);
-        font-size: 8px;
-      }
-
-      .graph-label {
-        position: absolute;
-        font-family: var(--font-mono);
-        font-size: 9px;
-        color: var(--fg-dim);
-        pointer-events: none;
-        white-space: nowrap;
-      }
-
-      .graph-edges {
+      /* SVG edges */
+      .pipe-edges {
         position: absolute;
         inset: 0;
         pointer-events: none;
       }
 
-      .graph-zoom-controls {
-        position: absolute;
-        bottom: 12px;
-        right: 12px;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-
-      .graph-info {
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        background: #0f111780;
-        backdrop-filter: blur(8px);
-        border: 1px solid var(--border);
-        border-radius: var(--radius);
-        padding: 6px 10px;
-        font-family: var(--font-mono);
-        font-size: 9px;
-        color: var(--fg-dim);
-        line-height: 1.8;
-      }
-
-      /* ─── CTX-4: METRICS ─── */
+      /* ── CTX-3: METRICS ── */
       #ctx-metrics {
-        grid-column: 1 / -1;
+        grid-column: 2;
         grid-row: 3;
         flex-direction: row;
+        border-right: none;
       }
 
       .metrics-section {
@@ -803,41 +467,38 @@
         border-right: none;
       }
 
-      .chart-area {
+      .chart-placeholder {
         flex: 1;
-        position: relative;
-        padding: 8px 12px;
-        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--fg-subtle);
+        font-family: var(--font-mono);
+        font-size: 10px;
       }
 
-      .chart-svg {
-        width: 100%;
-        height: 100%;
-        overflow: visible;
-      }
-
-      .kpi-grid {
-        display: grid;
-        grid-template-columns: repeat(6, 1fr);
+      .kpi-row {
+        display: flex;
         gap: 6px;
-        padding: 8px 12px;
-        flex-shrink: 0;
+        padding: 6px 10px;
         border-top: 1px solid var(--border);
+        flex-shrink: 0;
       }
 
       .kpi {
         background: var(--panel);
         border: 1px solid var(--border);
         border-radius: var(--radius);
-        padding: 6px 8px;
+        padding: 4px 8px;
+        flex: 1;
       }
 
       .kpi-val {
         font-family: var(--font-mono);
-        font-size: 14px;
+        font-size: 13px;
         font-weight: 700;
         line-height: 1;
-        margin-bottom: 2px;
+        margin-bottom: 1px;
       }
 
       .kpi-lbl {
@@ -851,500 +512,267 @@
         color: var(--emerald);
       }
 
-      .down {
-        color: var(--red);
-      }
-
       .neu {
         color: var(--fg);
       }
 
-      /* ─── Scrollbar / Misc ─── */
-      ::-webkit-scrollbar {
-        width: 4px;
-        height: 4px;
-      }
-
-      ::-webkit-scrollbar-track {
-        background: transparent;
-      }
-
-      ::-webkit-scrollbar-thumb {
-        background: var(--muted);
-        border-radius: 2px;
-      }
-
-      .sep {
-        width: 1px;
-        height: 20px;
-        background: var(--border);
+      .down {
+        color: var(--red);
       }
     </style>
   </head>
 
   <body>
 
-    <!-- ════════════════════════════════════════════════════════════════
-         HEADER
+    <!-- ════════════════════════════════════════════════════
+         HEADER / Topbar
          src/components/Topbar.tsx
-         describe: アプリの状態を確認する
-           [ ] ロゴ「KABU<TO>」とバージョンバッジが表示される
-           [ ] FalkorDB 接続状態バッジが表示される
-           [ ] 選択中の銘柄チップ（ticker / 社名 / 株価）が表示される
-           [ ] execution.mode バッジが表示される
-           [ ] Gemini ステータスバッジが表示される
-    ════════════════════════════════════════════════════════════════ -->
+         [Feature] ロゴ「KABU<TO>」とバージョンバッジを表示する
+         [Feature] SurrealDB 接続状態バッジを表示する（ok / error）
+         [Feature] 選択中の銘柄チップ（code / 社名 / 株価）を表示する
+         [Feature] pipeline.status バッジを表示する（idle / running）
+    ════════════════════════════════════════════════════════ -->
     <header>
-      <div class="header-brand">
-        <div class="header-logo">KABU<span>TO</span></div>
-        <div class="sep"></div>
-        <span class="badge badge-muted">v0.1.0</span>
-        <span class="badge badge-green"><span class="dot"></span>FalkorDB</span>
-        <span class="badge badge-muted">READ_ONLY_FROM_SIMULATION</span>
+      <span class="logo">KABU<span>&lt;TO&gt;</span></span>
+      <span class="badge badge-version">v0.3</span>
+      <div class="header-sep"></div>
+      <span class="badge badge-db-ok">SurrealDB ● connected</span>
+      <div class="header-sep"></div>
+      <div class="selection-chip">
+        1605 · INPEX
+        <span class="price">¥2,341 <span style="color:var(--emerald)">+1.2%</span></span>
       </div>
-      <div class="header-right">
-        <div class="selection-chip">
-          <span class="ticker">1605</span>
-          <span class="name">INPEX CORPORATION</span>
-          <span class="price">▲ 2,341.0 +1.23%</span>
-        </div>
-        <span class="badge badge-blue">GRAPH MODE</span>
-        <span class="badge badge-muted">Gemini · idle</span>
-      </div>
+      <div class="header-sep"></div>
+      <span class="badge badge-idle">● idle</span>
     </header>
 
-    <!-- ════════════════════════════════════════════════════════════════
-         STOCK SEARCH
-         責務: 銘柄検索・フィルタリング・selection.code の更新
-         DB アクセス: Read only（Tauri IPC → Polars-rs → master.parquet）
-         operationPolicy: read → auto
-
+    <!-- ════════════════════════════════════════════════════
+         CTX-1: STOCK SEARCH
          src/components/StockSearch.tsx
-         describe: 銘柄を検索・選択する
-           [ ] 検索ボックスにコード・ティッカー・名前を入力すると結果リストが絞り込まれる
-           [ ] 市場フィルター（ALL / JPX / NYSE / NASDAQ）で絞り込める
-           [ ] セクターフィルターで絞り込める
-           [ ] 結果アイテムをクリックすると onSelect が code と name で呼ばれる
-           [ ] 現在選択中のアイテムは selected スタイルで強調表示される
-           [ ] isLoading が true のときローディング表示になる
-
          src/hooks/useStockSearch.ts
-         describe: 銘柄検索クエリを管理する
-           [ ] setQuery を呼ぶと invoke("search_stocks") が発行される
-           [ ] setMarket を呼ぶと market フィルター付きで invoke が発行される
-           [ ] setSector を呼ぶと sector フィルター付きで invoke が発行される
-           [ ] 結果は最大 50 件に制限される
-           [ ] query が空のとき invoke を発行しない
-    ════════════════════════════════════════════════════════════════ -->
-    <nav id="ctx-search" class="panel">
+         DB: master.parquet（Polars-rs, search_stocks Tauri command）
+
+         [Feature] ticker / 社名でインクリメンタル検索する
+         [Feature] 市場・セクターフィルターで絞り込む
+         [Feature] 選択した銘柄を useKabutoStore.setSelection で更新する
+         [Feature] 最近の選択履歴を表示する
+
+         local state:
+           query: ""
+           marketFilter: "ALL"
+           sectorFilter: null
+           results: []
+    ════════════════════════════════════════════════════════ -->
+    <aside id="ctx-search" class="panel">
       <div class="panel-header">
-        <span class="panel-title">01 · Stock Search</span>
-        <span class="badge badge-green"><span class="dot"></span>read</span>
+        <span class="panel-title">Stock Search</span>
+        <span class="badge badge-version">master.parquet</span>
       </div>
-
-      <!-- 検索ボックス -->
-      <div class="search-box-wrap">
-        <input class="search-input" type="text" placeholder="コード・ティッカー・社名… 例: 1605, INPEX, AAPL" />
-      </div>
-
-      <!-- 市場フィルター -->
-      <div class="filter-row">
-        <button class="filter-chip active">ALL</button>
-        <button class="filter-chip">JPX</button>
-        <button class="filter-chip">NYSE</button>
-        <button class="filter-chip">NASDAQ</button>
-      </div>
-
-      <!-- セクターフィルター -->
-      <div class="filter-row" style="border-bottom:none; padding-bottom:4px;">
-        <button class="filter-chip active">全セクター</button>
-        <button class="filter-chip">エネルギー</button>
-        <button class="filter-chip">素材</button>
-        <button class="filter-chip">情報技術</button>
-        <button class="filter-chip">金融</button>
-      </div>
-
-      <!-- 検索結果リスト -->
-      <div class="panel-body" style="padding:0;">
-        <div class="result-list">
-
-          <!-- 選択中 -->
-          <div class="result-item selected">
-            <div class="result-item-left">
-              <span class="result-ticker">1605</span>
-              <span class="result-name">INPEX CORPORATION</span>
-            </div>
-            <div class="result-item-right">
-              <span class="result-price">2,341</span>
-              <span class="result-change up">+1.21%</span>
-            </div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-left">
-              <span class="result-ticker">5020</span>
-              <span class="result-name">ENEOS ホールディングス</span>
-            </div>
-            <div class="result-item-right">
-              <span class="result-price">1,089</span>
-              <span class="result-change up">+0.74%</span>
-            </div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-left">
-              <span class="result-ticker">AAPL</span>
-              <span class="result-name">Apple Inc.</span>
-            </div>
-            <div class="result-item-right">
-              <span class="result-price">$213.40</span>
-              <span class="result-change down">−0.38%</span>
-            </div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-left">
-              <span class="result-ticker">6758</span>
-              <span class="result-name">ソニーグループ</span>
-            </div>
-            <div class="result-item-right">
-              <span class="result-price">13,250</span>
-              <span class="result-change up">+2.05%</span>
-            </div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-left">
-              <span class="result-ticker">NVDA</span>
-              <span class="result-name">NVIDIA Corporation</span>
-            </div>
-            <div class="result-item-right">
-              <span class="result-price">$875.20</span>
-              <span class="result-change up">+3.12%</span>
-            </div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-left">
-              <span class="result-ticker">7203</span>
-              <span class="result-name">トヨタ自動車</span>
-            </div>
-            <div class="result-item-right">
-              <span class="result-price">3,782</span>
-              <span class="result-change down">−0.52%</span>
-            </div>
-          </div>
-
-          <div class="result-item">
-            <div class="result-item-left">
-              <span class="result-ticker">8306</span>
-              <span class="result-name">三菱UFJフィナンシャル・グループ</span>
-            </div>
-            <div class="result-item-right">
-              <span class="result-price">1,624</span>
-              <span class="result-change up">+0.99%</span>
-            </div>
-          </div>
-
+      <div class="feature-list">
+        <div class="feature-item">
+          <span class="feature-label">Search</span>
+          ticker / 社名でインクリメンタル検索（最大50件）
+        </div>
+        <div class="feature-item">
+          <span class="feature-label">Filter</span>
+          市場（プライム・スタンダード・グロース）・セクターで絞り込み
+        </div>
+        <div class="feature-item">
+          <span class="feature-label">Select</span>
+          選択 → useKabutoStore.setSelection(code, name) を更新
+        </div>
+        <div class="feature-item db">
+          <span class="feature-label">Data Source</span>
+          Polars-rs → master.parquet（search_stocks Tauri command）
         </div>
       </div>
-    </nav>
+    </aside>
 
-    <!-- ════════════════════════════════════════════════════════════════
-         PIPELINE BUILDER / RESULT VIEWER
-         責務: 解析パイプラインの構築（BUILDER）と結果表示（RESULT）
-         DB アクセス: Read only（FalkorDB Cypher・Parquet）
-
-         BUILDERタブ:
-           ノードをD&Dで繋ぎ分析ロジックを定義する（@xyflow/react）
-           ノード種別:
-             SOURCE    → データ取得（FalkorDB・Parquet）
-             TRANSFORM → 変換・計算（Polars / Python script）
-             OUTPUT    → 結果出力（Chart・Table・Graph・値）
-           完成したパイプラインは pipelineRegistry に登録する
-           LLMへの要件伝達でノードを動的生成できる
-
-         RESULTタブ:
-           OUTPUTノードの種類に応じてレンダリングを切り替える
-           複数OUTPUTノードが縦に並ぶ
-
+    <!-- ════════════════════════════════════════════════════
+         CTX-2: PIPELINE BUILDER
          src/components/PipelineBuilder.tsx
-         describe: 解析パイプラインを構築する
-           [ ] BUILDERタブでノードキャンバスが表示される
-           [ ] ノードパレットからD&Dでノードを追加できる
-           [ ] ノード間をエッジで接続できる
-           [ ] RESULTタブに切り替えるとOUTPUTノードの結果が表示される
-           [ ] 「保存」でpipelineRegistryに登録され onPipelineSave が呼ばれる
-
          src/hooks/usePipelineBuilder.ts
-         describe: パイプラインの状態を管理する
-           [ ] nodes / edges の追加・削除・接続を管理する
-           [ ] パイプラインを実行するとOUTPUTノードの結果を収集する
-           [ ] pipelineRegistryへの保存・読み込みができる
-    ════════════════════════════════════════════════════════════════ -->
+         DB: SurrealDB（SOURCE ノードが SurrealQL を発行）
+             Parquet（CALC ノードが Polars-rs を呼ぶ）
+
+         [Feature] BUILDER / RESULT タブを切り替える
+         [Feature] ノードパレットから SOURCE / FILTER / CALC / OUTPUT を追加する
+         [Feature] ノードをドラッグ＆ドロップで配置する
+         [Feature] 型が合うポート間のみエッジ接続を許可する（オントロジー制約）
+         [Feature] RUN ボタンでパイプラインを実行し pipeline.status を更新する
+         [Feature] RESULT タブに実行結果（仮説の採否）を表示する
+
+         ノード種別・型:
+           SOURCE  → SurrealQL発行 / Parquet読み込み  out: StockList | TimeSeries
+           FILTER  → 条件絞り込み                     in: StockList  out: StockList
+           CALC    → 相関・因果検定（Polars-rs）       in: TimeSeries out: MetricResult
+           OUTPUT  → チャート / テーブル / 仮説採否    in: MetricResult out: Visualization
+
+         local state:
+           activeTab: "BUILDER"
+           nodes: []
+           edges: []
+           isRunning: false
+    ════════════════════════════════════════════════════════ -->
     <main id="pipeline-builder" class="panel">
       <div class="panel-header">
         <span class="panel-title">Pipeline Builder</span>
-        <div class="panel-actions">
-          <div class="mode-tabs">
-            <button class="mode-tab active">BUILDER</button>
-            <button class="mode-tab">RESULT</button>
-          </div>
-          <button class="btn btn-outline btn-sm">▶ 実行</button>
-          <button class="btn btn-ghost btn-sm">保存</button>
-        </div>
+        <span class="badge badge-version">@xyflow/react</span>
       </div>
 
-      <!-- BUILDERタブ: @xyflow/react キャンバス -->
-      <div class="graph-canvas">
-        <div class="graph-info">
-          NODES 5 · EDGES 4 · pipeline: oil_sensitivity
-        </div>
+      <div class="tab-bar">
+        <button class="tab active">BUILDER</button>
+        <button class="tab">RESULT</button>
+      </div>
 
-        <!-- エッジ -->
-        <svg class="graph-edges" viewBox="0 0 700 400" preserveAspectRatio="none">
-          <defs>
-            <marker id="arrow2" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-              <path d="M0,0 L0,6 L6,3 z" fill="#3b82f660" />
-            </marker>
-          </defs>
-          <!-- SOURCE → TRANSFORM -->
-          <path d="M 190,120 C 240,120 250,160 300,160" stroke="#10b98150" stroke-width="1.5" fill="none"
-            marker-end="url(#arrow2)" />
-          <!-- SOURCE → TRANSFORM -->
-          <path d="M 190,240 C 240,240 250,200 300,200" stroke="#10b98150" stroke-width="1.5" fill="none"
-            marker-end="url(#arrow2)" />
-          <!-- TRANSFORM → TRANSFORM -->
-          <path d="M 430,180 C 460,180 460,180 480,180" stroke="#3b82f650" stroke-width="1.5" fill="none"
-            marker-end="url(#arrow2)" />
-          <!-- TRANSFORM → OUTPUT × 2 -->
-          <path d="M 600,160 C 630,160 630,130 660,130" stroke="#f59e0b50" stroke-width="1.5" fill="none"
-            marker-end="url(#arrow2)" />
-          <path d="M 600,200 C 630,200 630,230 660,230" stroke="#f59e0b50" stroke-width="1.5" fill="none"
-            marker-end="url(#arrow2)" />
+      <!-- BUILDER キャンバス（サンプル: 石油感応度分析） -->
+      <div class="canvas-area" data-testid="pipeline-canvas">
+
+        <svg class="pipe-edges" viewBox="0 0 900 400" preserveAspectRatio="none">
+          <!-- SOURCE → FILTER -->
+          <path d="M 250 80 C 310 80 330 100 390 100" stroke="#10b981" stroke-width="1.5" fill="none" opacity="0.6" />
+          <!-- FILTER → CALC -->
+          <path d="M 540 100 C 600 100 620 130 680 130" stroke="#8b5cf6" stroke-width="1.5" fill="none" opacity="0.6" />
+          <!-- SOURCE(WTI) → CALC -->
+          <path d="M 250 170 C 400 170 500 150 680 140" stroke="#10b981" stroke-width="1.5" fill="none" opacity="0.6"
+            stroke-dasharray="4,3" />
+          <!-- CALC → OUTPUT -->
+          <path d="M 830 135 C 860 135 860 220 680 240" stroke="#3b82f6" stroke-width="1.5" fill="none" opacity="0.6" />
         </svg>
 
-        <!-- SOURCE: FalkorDB -->
-        <div class="pipe-node node-source" style="left:60px;top:95px;">
+        <!-- SOURCE: SurrealDB → 石油影響企業 -->
+        <div class="pipe-node node-source" style="left:60px; top:50px;">
           <div class="pipe-port right"></div>
           <div class="pipe-node-label">SOURCE</div>
-          <div class="pipe-node-name">FalkorDB</div>
-          <div class="pipe-node-param">id: 1605 · depth: 2</div>
+          <div class="pipe-node-name">SurrealDB Query</div>
+          <div class="pipe-node-param">macro:WTI →AFFECTED_BY← company</div>
+          <div class="pipe-node-type">out: StockList</div>
         </div>
 
-        <!-- SOURCE: Parquet -->
-        <div class="pipe-node node-source" style="left:60px;top:215px;">
+        <!-- SOURCE: Parquet → WTI時系列 -->
+        <div class="pipe-node node-source" style="left:60px; top:145px;">
           <div class="pipe-port right"></div>
           <div class="pipe-node-label">SOURCE</div>
           <div class="pipe-node-name">Parquet</div>
-          <div class="pipe-node-param">1605_price.parquet · 1Y</div>
+          <div class="pipe-node-param">WTI 日次 · 5Y</div>
+          <div class="pipe-node-type">out: TimeSeries</div>
         </div>
 
-        <!-- TRANSFORM: stress_test -->
-        <div class="pipe-node node-transform" style="left:300px;top:150px;">
+        <!-- FILTER: セクター絞り込み -->
+        <div class="pipe-node node-filter" style="left:390px; top:70px;">
           <div class="pipe-port left"></div>
           <div class="pipe-port right"></div>
-          <div class="pipe-node-label">TRANSFORM</div>
-          <div class="pipe-node-name">stress_test</div>
-          <div class="pipe-node-param">crude_oil · ±10%</div>
+          <div class="pipe-node-label">FILTER</div>
+          <div class="pipe-node-name">Sector</div>
+          <div class="pipe-node-param">エネルギー・化学・運輸</div>
+          <div class="pipe-node-type">in: StockList → out: StockList</div>
         </div>
 
-        <!-- TRANSFORM: correlation -->
-        <div class="pipe-node node-transform" style="left:480px;top:160px;">
+        <!-- CALC: 相関検定 -->
+        <div class="pipe-node node-calc" style="left:680px; top:100px;">
           <div class="pipe-port left"></div>
           <div class="pipe-port right"></div>
-          <div class="pipe-node-label">TRANSFORM</div>
-          <div class="pipe-node-name">correlation</div>
-          <div class="pipe-node-param">pearson · window: 60d</div>
+          <div class="pipe-node-label">CALC</div>
+          <div class="pipe-node-name">Correlation</div>
+          <div class="pipe-node-param">Pearson / 252d rolling</div>
+          <div class="pipe-node-type">in: StockList + TimeSeries → out: MetricResult</div>
         </div>
 
-        <!-- OUTPUT: Chart -->
-        <div class="pipe-node node-output" style="left:650px;top:105px;">
-          <div class="pipe-port left"></div>
-          <div class="pipe-node-label">OUTPUT</div>
-          <div class="pipe-node-name">Chart</div>
-          <div class="pipe-node-param">type: candlestick</div>
-        </div>
-
-        <!-- OUTPUT: Table -->
-        <div class="pipe-node node-output" style="left:650px;top:205px;">
+        <!-- OUTPUT: テーブル -->
+        <div class="pipe-node node-output" style="left:490px; top:210px;">
           <div class="pipe-port left"></div>
           <div class="pipe-node-label">OUTPUT</div>
           <div class="pipe-node-name">Table</div>
-          <div class="pipe-node-param">impact_score · nodes</div>
+          <div class="pipe-node-param">corr / confirmed / lag_days</div>
+          <div class="pipe-node-type">in: MetricResult → Visualization</div>
         </div>
 
-        <div class="graph-zoom-controls">
-          <button class="btn btn-outline btn-sm">+</button>
-          <button class="btn btn-outline btn-sm">−</button>
-          <button class="btn btn-outline btn-sm">⊡</button>
-        </div>
       </div>
     </main>
 
-    <!-- ════════════════════════════════════════════════════════════════
-         CTX-4: METRICS ENGINE
-         責務: Polars による計算・チャート描画・シミュレーションレポート表示
-         DB アクセス: Read only（Parquet）
-         トリガー:
-           selection_change    → 選択銘柄の時系列データをロード
-           simulationReportPath → レポートファイルを読み込み予測エッジを合成
-
+    <!-- ════════════════════════════════════════════════════
+         CTX-3: METRICS PANEL
          src/components/MetricsPanel.tsx
-         describe: 銘柄の指標・チャートを確認する
-           [ ] 選択銘柄のローソク足チャートが表示される
-           [ ] KPI（現在値・前日比・高値・安値・出来高・時価総額）が表示される
-           [ ] 期間ボタン（1W・1M・1Y・5Y）で onPeriodChange が呼ばれる
-           [ ] simulationReportPath が渡されると予測ライン（破線）が合成表示される
-
          src/hooks/useMetrics.ts
-         describe: 銘柄の時系列データを取得・計算する
-           [ ] selection が変わると Polars 経由で時系列データをロードする
-           [ ] period が変わるとデータ範囲を絞り込む
-           [ ] simulationReportPath が渡されるとレポートを読み込み予測データを返す
-           [ ] 一度ロードしたデータはセッション内でキャッシュされる
-    ════════════════════════════════════════════════════════════════ -->
-    <footer id="ctx-metrics" class="panel" style="flex-direction:row;">
+         DB: price.parquet（Polars-rs, get_price_data Tauri command）
+             SurrealDB（confirmed エッジの取得）
 
+         [Feature] 選択銘柄のローソク足チャートを表示する
+         [Feature] KPI（現在値・前日比・高値・安値・出来高）を表示する
+         [Feature] WTI など関連 MacroIndicator の時系列を重ねて表示する
+         [Feature] 期間ボタン（1W / 1M / 1Y / 5Y）で表示範囲を切り替える
+         [Feature] CALC 結果（相関係数・確認済みフラグ）をオーバーレイ表示する
+         [Feature] selection.code 変化で自動リロードする
+
+         local state:
+           period: "1Y"
+           overlayMetric: null   ← "WTI" | "USD/JPY" など
+    ════════════════════════════════════════════════════════ -->
+    <footer id="ctx-metrics" class="panel">
+
+      <!-- Section A: 銘柄チャート -->
       <div class="metrics-section">
         <div class="panel-header">
           <span class="panel-title">Price · 1605 INPEX</span>
-          <div class="panel-actions">
-            <button class="btn btn-ghost btn-sm">1W</button>
-            <button class="btn btn-ghost btn-sm">1M</button>
-            <button class="btn btn-outline btn-sm">1Y</button>
-            <button class="btn btn-ghost btn-sm">5Y</button>
+          <div style="display:flex; gap:4px;">
+            <button class="badge badge-idle" style="cursor:pointer;">1W</button>
+            <button class="badge badge-idle" style="cursor:pointer;">1M</button>
+            <button class="badge badge-running" style="cursor:pointer;">1Y</button>
+            <button class="badge badge-idle" style="cursor:pointer;">5Y</button>
           </div>
         </div>
-        <div class="chart-area">
-          <svg class="chart-svg" viewBox="0 0 780 90" preserveAspectRatio="none">
-            <defs>
-              <linearGradient id="volGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.35" />
-                <stop offset="100%" stop-color="#3b82f6" stop-opacity="0" />
-              </linearGradient>
-            </defs>
-            <!-- 出来高バー -->
-            <rect x="0" y="76" width="18" height="12" fill="url(#volGrad)" />
-            <rect x="26" y="70" width="18" height="18" fill="url(#volGrad)" />
-            <rect x="52" y="78" width="18" height="10" fill="url(#volGrad)" />
-            <rect x="78" y="73" width="18" height="15" fill="url(#volGrad)" />
-            <rect x="104" y="68" width="18" height="20" fill="url(#volGrad)" />
-            <rect x="130" y="74" width="18" height="14" fill="url(#volGrad)" />
-            <rect x="156" y="66" width="18" height="22" fill="url(#volGrad)" />
-            <rect x="182" y="72" width="18" height="16" fill="url(#volGrad)" />
-            <rect x="208" y="80" width="18" height="8" fill="url(#volGrad)" />
-            <rect x="234" y="64" width="18" height="24" fill="url(#volGrad)" />
-            <rect x="260" y="70" width="18" height="18" fill="url(#volGrad)" />
-            <rect x="286" y="76" width="18" height="12" fill="url(#volGrad)" />
-            <rect x="312" y="60" width="18" height="28" fill="url(#volGrad)" />
-            <rect x="338" y="74" width="18" height="14" fill="url(#volGrad)" />
-            <rect x="364" y="68" width="18" height="20" fill="url(#volGrad)" />
-            <rect x="390" y="62" width="18" height="26" fill="url(#volGrad)" />
-            <rect x="416" y="76" width="18" height="12" fill="url(#volGrad)" />
-            <rect x="442" y="58" width="18" height="30" fill="url(#volGrad)" />
-            <rect x="468" y="72" width="18" height="16" fill="url(#volGrad)" />
-            <rect x="494" y="54" width="18" height="34" fill="url(#volGrad)" />
-            <rect x="520" y="66" width="18" height="22" fill="url(#volGrad)" />
-            <rect x="546" y="56" width="18" height="32" fill="url(#volGrad)" />
-            <rect x="572" y="62" width="18" height="26" fill="url(#volGrad)" />
-            <rect x="598" y="48" width="18" height="40" fill="url(#volGrad)" />
-            <rect x="624" y="60" width="18" height="28" fill="url(#volGrad)" />
-            <rect x="650" y="44" width="18" height="44" fill="url(#volGrad)" />
-            <rect x="676" y="52" width="18" height="36" fill="url(#volGrad)" />
-            <rect x="702" y="40" width="18" height="48" fill="url(#volGrad)" />
-            <rect x="728" y="48" width="18" height="40" fill="url(#volGrad)" />
-            <rect x="754" y="36" width="18" height="52" fill="url(#volGrad)" />
-            <!-- ローソク足（陽=emerald / 陰=red） -->
-            <line x1="9" y1="46" x2="9" y2="62" stroke="#4b5563" stroke-width="1" />
-            <rect x="3" y="50" width="12" height="6" fill="#10b981" />
-            <line x1="35" y1="38" x2="35" y2="58" stroke="#4b5563" stroke-width="1" />
-            <rect x="29" y="38" width="12" height="10" fill="#ef4444" />
-            <line x1="61" y1="42" x2="61" y2="60" stroke="#4b5563" stroke-width="1" />
-            <rect x="55" y="44" width="12" height="8" fill="#10b981" />
-            <line x1="87" y1="34" x2="87" y2="55" stroke="#4b5563" stroke-width="1" />
-            <rect x="81" y="38" width="12" height="10" fill="#10b981" />
-            <line x1="113" y1="30" x2="113" y2="50" stroke="#4b5563" stroke-width="1" />
-            <rect x="107" y="30" width="12" height="8" fill="#ef4444" />
-            <line x1="139" y1="32" x2="139" y2="52" stroke="#4b5563" stroke-width="1" />
-            <rect x="133" y="36" width="12" height="10" fill="#10b981" />
-            <line x1="165" y1="24" x2="165" y2="46" stroke="#4b5563" stroke-width="1" />
-            <rect x="159" y="26" width="12" height="12" fill="#10b981" />
-            <line x1="191" y1="26" x2="191" y2="48" stroke="#4b5563" stroke-width="1" />
-            <rect x="185" y="28" width="12" height="8" fill="#ef4444" />
-            <line x1="217" y1="30" x2="217" y2="50" stroke="#4b5563" stroke-width="1" />
-            <rect x="211" y="32" width="12" height="10" fill="#10b981" />
-            <line x1="243" y1="18" x2="243" y2="42" stroke="#4b5563" stroke-width="1" />
-            <rect x="237" y="20" width="12" height="14" fill="#10b981" />
-            <line x1="269" y1="20" x2="269" y2="40" stroke="#4b5563" stroke-width="1" />
-            <rect x="263" y="22" width="12" height="8" fill="#ef4444" />
-            <line x1="295" y1="22" x2="295" y2="44" stroke="#4b5563" stroke-width="1" />
-            <rect x="289" y="24" width="12" height="10" fill="#10b981" />
-            <line x1="321" y1="12" x2="321" y2="38" stroke="#4b5563" stroke-width="1" />
-            <rect x="315" y="14" width="12" height="14" fill="#10b981" />
-            <line x1="347" y1="16" x2="347" y2="38" stroke="#4b5563" stroke-width="1" />
-            <rect x="341" y="18" width="12" height="10" fill="#ef4444" />
-            <line x1="373" y1="14" x2="373" y2="36" stroke="#4b5563" stroke-width="1" />
-            <rect x="367" y="16" width="12" height="12" fill="#10b981" />
-            <line x1="399" y1="6" x2="399" y2="32" stroke="#4b5563" stroke-width="1" />
-            <rect x="393" y="8" width="12" height="14" fill="#10b981" />
-            <line x1="425" y1="10" x2="425" y2="34" stroke="#4b5563" stroke-width="1" />
-            <rect x="419" y="12" width="12" height="10" fill="#ef4444" />
-            <line x1="451" y1="4" x2="451" y2="28" stroke="#4b5563" stroke-width="1" />
-            <rect x="445" y="6" width="12" height="14" fill="#10b981" />
-            <line x1="477" y1="8" x2="477" y2="30" stroke="#4b5563" stroke-width="1" />
-            <rect x="471" y="10" width="12" height="10" fill="#ef4444" />
-            <line x1="503" y1="2" x2="503" y2="24" stroke="#4b5563" stroke-width="1" />
-            <rect x="497" y="4" width="12" height="12" fill="#10b981" />
-            <line x1="529" y1="4" x2="529" y2="26" stroke="#4b5563" stroke-width="1" />
-            <rect x="523" y="6" width="12" height="12" fill="#10b981" />
-            <line x1="555" y1="2" x2="555" y2="22" stroke="#4b5563" stroke-width="1" />
-            <rect x="549" y="4" width="12" height="10" fill="#10b981" />
-            <line x1="581" y1="4" x2="581" y2="24" stroke="#4b5563" stroke-width="1" />
-            <rect x="575" y="6" width="12" height="8" fill="#ef4444" />
-            <line x1="607" y1="2" x2="607" y2="20" stroke="#4b5563" stroke-width="1" />
-            <rect x="601" y="4" width="12" height="12" fill="#10b981" />
-            <line x1="633" y1="4" x2="633" y2="22" stroke="#4b5563" stroke-width="1" />
-            <rect x="627" y="6" width="12" height="10" fill="#ef4444" />
-            <line x1="659" y1="2" x2="659" y2="18" stroke="#4b5563" stroke-width="1" />
-            <rect x="653" y="4" width="12" height="10" fill="#10b981" />
-            <line x1="685" y1="4" x2="685" y2="20" stroke="#4b5563" stroke-width="1" />
-            <rect x="679" y="6" width="12" height="8" fill="#ef4444" />
-            <line x1="711" y1="2" x2="711" y2="16" stroke="#4b5563" stroke-width="1" />
-            <rect x="705" y="4" width="12" height="10" fill="#10b981" />
-            <line x1="737" y1="4" x2="737" y2="18" stroke="#4b5563" stroke-width="1" />
-            <rect x="731" y="6" width="12" height="8" fill="#ef4444" />
-            <!-- 最新足（amber 強調） -->
-            <line x1="763" y1="2" x2="763" y2="14" stroke="#f59e0b" stroke-width="1.5" />
-            <rect x="757" y="4" width="12" height="8" fill="#10b981" stroke="#f59e0b" stroke-width="1" />
-            <!-- 現在値ライン -->
-            <line x1="0" y1="4" x2="780" y2="4" stroke="#10b98130" stroke-width="0.5" stroke-dasharray="3 3" />
-          </svg>
+        <div class="chart-placeholder">
+          [ Recharts ローソク足 · price.parquet ]
         </div>
-        <div class="kpi-grid">
+        <div class="kpi-row">
           <div class="kpi">
-            <div class="kpi-val up">2,341</div>
-            <div class="kpi-lbl">現在値 (JPY)</div>
+            <div class="kpi-val neu">¥2,341</div>
+            <div class="kpi-lbl">現在値</div>
           </div>
           <div class="kpi">
-            <div class="kpi-val up">+28 (+1.21%)</div>
+            <div class="kpi-val up">+1.2%</div>
             <div class="kpi-lbl">前日比</div>
           </div>
           <div class="kpi">
-            <div class="kpi-val neu">2,298</div>
-            <div class="kpi-lbl">本日 安値</div>
+            <div class="kpi-val neu">¥2,380</div>
+            <div class="kpi-lbl">高値</div>
           </div>
           <div class="kpi">
-            <div class="kpi-val neu">2,356</div>
-            <div class="kpi-lbl">本日 高値</div>
+            <div class="kpi-val neu">¥2,310</div>
+            <div class="kpi-lbl">安値</div>
           </div>
           <div class="kpi">
-            <div class="kpi-val neu">4.2M</div>
+            <div class="kpi-val neu">8.2M</div>
             <div class="kpi-lbl">出来高</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Section B: MacroIndicator オーバーレイ -->
+      <div class="metrics-section">
+        <div class="panel-header">
+          <span class="panel-title">Macro Overlay · WTI</span>
+          <span class="badge badge-db-ok">SurrealDB confirmed</span>
+        </div>
+        <div class="chart-placeholder">
+          [ WTI 日次 vs INPEX 株価 · 相関 0.82 ]
+        </div>
+        <div class="kpi-row">
           <div class="kpi">
-            <div class="kpi-val neu">2.31T</div>
-            <div class="kpi-lbl">時価総額</div>
+            <div class="kpi-val up">0.82</div>
+            <div class="kpi-lbl">Pearson r</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-val up">✓</div>
+            <div class="kpi-lbl">confirmed</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-val neu">3d</div>
+            <div class="kpi-lbl">lag</div>
+          </div>
+          <div class="kpi">
+            <div class="kpi-val neu">252d</div>
+            <div class="kpi-lbl">window</div>
           </div>
         </div>
       </div>
