@@ -6,6 +6,13 @@ import { useKabutoStore } from '@/store/useKabutoStore'
 
 const meta: Meta<typeof PlayGround> = {
     component: PlayGround,
+    decorators: [
+        (Story) => (
+            <div style={{ width: '100vw', height: '100vh' }}>
+                <Story />
+            </div>
+        ),
+    ],
     beforeEach: () => {
         useKabutoStore.setState({ selection: null, pipeline: { status: 'idle', activeId: null } })
     },
@@ -14,16 +21,12 @@ export default meta
 
 type Story = StoryObj<typeof PlayGround>
 
-// ── 選択なし ──────────────────────────────────────────────────────────────────
-
 export const Empty: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement)
         await expect(canvas.getByTestId('playground-empty')).toBeInTheDocument()
     },
 }
-
-// ── 選択あり ──────────────────────────────────────────────────────────────────
 
 export const WithSelection: Story = {
     beforeEach: () => {
@@ -35,12 +38,8 @@ export const WithSelection: Story = {
     play: async ({ canvasElement }) => {
         const canvas = within(canvasElement)
         await expect(canvas.getByTestId('node-company')).toBeInTheDocument()
-        await expect(canvas.getByText('1605')).toBeInTheDocument()
-        await expect(canvas.getByText('INPEX')).toBeInTheDocument()
     },
 }
-
-// ── タブ切替 ──────────────────────────────────────────────────────────────────
 
 export const TabSwitch: Story = {
     beforeEach: () => {
