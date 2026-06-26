@@ -5,11 +5,6 @@
     "lib": ["ES2020", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "skipLibCheck": true,
-    "paths": {
-      "@/*": ["./src/*"],
-      "@hooks/*": ["./src/hooks/*"],
-      "@components/*": ["./src/components/*"]
-    },
 
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -25,9 +20,8 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Vitest globals */
-    "types": ["vitest/globals", "@testing-library/jest-dom"]
+    "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["src"],
+  "include": ["src", "tests"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

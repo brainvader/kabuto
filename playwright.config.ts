@@ -1,16 +1,20 @@
 import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
-    testDir: './docs/specs',
+    testDir: './tests',
     testMatch: '**/*.spec.ts',
     outputDir: './evidence',
     use: {
         baseURL: 'http://localhost:1420',
-        screenshot: 'on',
+        launchOptions: {
+            slowMo: 1000,
+        },
     },
     webServer: {
         command: 'pnpm dev',
         url: 'http://localhost:1420',
-        reuseExistingServer: true,
+        reuseExistingServer: !process.env.CI,
+        env: { VITE_PLAYWRIGHT: 'true' },
+        timeout: 60_000,
     },
 });
