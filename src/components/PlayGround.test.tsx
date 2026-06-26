@@ -1,9 +1,19 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
-import { PlayGround } from '@/components/PlayGround'
-import { useKabutoStore } from '@/store/useKabutoStore'
+import { PlayGround } from './PlayGround'
+import { useKabutoStore } from '../store/useKabutoStore'
+
+// ReactFlow はブラウザ依存のためモックする
+vi.mock('@xyflow/react', () => ({
+    ReactFlow: ({ nodes }: { nodes: { id: string }[] }) =>
+        React.createElement('div', { 'data-testid': 'react-flow', 'data-nodes': nodes.length }),
+    Background: () => null,
+    BackgroundVariant: { Dots: 'dots' },
+}))
+
+import React from 'react'
 
 beforeEach(() => {
     useKabutoStore.setState({ selection: null, pipeline: { status: 'idle', activeId: null } })
@@ -45,29 +55,35 @@ describe('selection がある場合', () => {
         })
     })
 
-    it('選択銘柄のノードが表示される', () => {
+    it('node-company ラッパーが表示される', () => {
         render(<PlayGround />)
         expect(screen.getByTestId('node-company')).toBeInTheDocument()
     })
 
-    it('証券コードが表示される', () => {
+    it('ReactFlow に1ノードが渡される', () => {
         render(<PlayGround />)
-        expect(screen.getByText('1605')).toBeInTheDocument()
-    })
-
-    it('銘柄名が表示される', () => {
-        render(<PlayGround />)
-        expect(screen.getByText('INPEX')).toBeInTheDocument()
+        expect(screen.getByTestId('react-flow')).toHaveAttribute('data-nodes', '1')
     })
 
     it('selection が変わるとノードが更新される', () => {
         render(<PlayGround />)
-        expect(screen.getByText('INPEX')).toBeInTheDocument()
+        expect(screen.getByTestId('react-flow')).toHaveAttribute('data-nodes', '1')
 
         act(() => {
             useKabutoStore.setState({ selection: { code: '7203', name: 'トヨタ自動車' } })
         })
 
-        expect(screen.getByText('トヨタ自動車')).toBeInTheDocument()
+        expect(screen.getByTestId('react-flow')).toHaveAttribute('data-nodes', '1')
+    })
+
+    it('selection が null になるとプレースホルダーに戻る', () => {
+        render(<PlayGround />)
+        expect(screen.getByTestId('node-company')).toBeInTheDocument()
+
+        act(() => {
+            useKabutoStore.setState({ selection: null })
+        })
+
+        expect(screen.getByTestId('playground-empty')).toBeInTheDocument()
     })
 })
