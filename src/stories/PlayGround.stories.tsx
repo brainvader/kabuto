@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, within } from 'storybook/test'
 
-import { PlayGround } from '@components/PlayGround'
+import { PlayGround } from '@/components/PlayGround'
 import { useKabutoStore } from '@/store/useKabutoStore'
 
 const meta: Meta<typeof PlayGround> = {

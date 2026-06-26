@@ -8,7 +8,7 @@ import {
 } from '@xyflow/react'
 import { expect, within } from 'storybook/test'
 
-import { nodeTypes } from '@components/nodes/nodeTypes'
+import { nodeTypes } from '@/components/nodes/nodeTypes'
 
 const meta: Meta = {
     title: 'Nodes/CompanyNode',
