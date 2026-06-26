@@ -69,7 +69,10 @@ pub fn run(jpx_path: &PathBuf, codelist_path: &PathBuf, output_path: &PathBuf) -
             col("ＥＤＩＮＥＴコード").alias("EDINETコード"),
             col("決算日"),
             col("提出者法人番号").alias("法人番号"),
-            col("証券コード"),
+            col("証券コード")
+                .str()
+                .slice(lit(0), lit(4)) // 先頭4文字を取得
+                .alias("証券コード"),
         ])
         .collect()
         .map_err(|e| anyhow::anyhow!("EDINET変換失敗: {}", e))?;
