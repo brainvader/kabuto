@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useKabutoStore } from '../store/useKabutoStore'
+import { useKabutoStore } from '@/store/useKabutoStore'
 
 type Tab = 'GRAPH' | 'RESULT'
 

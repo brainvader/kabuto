@@ -1,6 +1,6 @@
-import { StockSearch } from './components/StockSearch'
-import { PlayGround } from './components/PlayGround'
-import { useKabutoStore } from './store/useKabutoStore'
+import { StockSearch } from '@/components/StockSearch'
+import { PlayGround } from '@/components/PlayGround'
+import { useKabutoStore } from '@/store/useKabutoStore'
 
 function App() {
   const setSelection = useKabutoStore((s) => s.setSelection)

@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
-import { PlayGround } from './PlayGround'
-import { useKabutoStore } from '../store/useKabutoStore'
+import { PlayGround } from '@/components/PlayGround'
+import { useKabutoStore } from '@/store/useKabutoStore'
 
 beforeEach(() => {
     useKabutoStore.setState({ selection: null, pipeline: { status: 'idle', activeId: null } })

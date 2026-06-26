@@ -3,7 +3,7 @@ import { render, screen } from '@testing-library/react'
 import React from 'react'
 
 import App from './App'
-import { useKabutoStore } from './store/useKabutoStore'
+import { useKabutoStore } from '@/store/useKabutoStore'
 
 const { mockOnSelect } = vi.hoisted(() => ({ mockOnSelect: vi.fn() }))
 
