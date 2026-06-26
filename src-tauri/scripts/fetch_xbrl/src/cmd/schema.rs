@@ -2,7 +2,7 @@ use anyhow::Result;
 use polars::prelude::*;
 use std::path::PathBuf;
 
-pub fn run(input: &PathBuf) -> Result<()> {
+pub fn run(input: &PathBuf, show_data: bool, columns: &[String], limit: usize) -> Result<()> {
     let file = std::fs::File::open(input)
         .map_err(|_| anyhow::anyhow!("ファイルを開けません: {}", input.display()))?;
     let df = ParquetReader::new(file)
@@ -18,5 +18,19 @@ pub fn run(input: &PathBuf) -> Result<()> {
         println!("{:<20} {:?}", field.name(), field.dtype());
     }
     println!("{}", "─".repeat(40));
+
+    if show_data {
+        let view = if columns.is_empty() {
+            df.clone()
+        } else {
+            let cols: Vec<&str> = columns.iter().map(|s| s.as_str()).collect();
+            df.select(cols)
+                .map_err(|e| anyhow::anyhow!("列選択失敗: {}", e))?
+        };
+
+        let view = view.head(Some(limit));
+        println!("\n{}", view);
+    }
+
     Ok(())
 }

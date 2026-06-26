@@ -18,20 +18,26 @@ pub enum Command {
     },
     /// 東証上場銘柄一覧から個別株を抽出して Parquet に保存
     Master {
-        /// 東証上場銘柄一覧CSV（data_j.csv）
         #[arg(long, value_name = "FILE")]
         jpx: PathBuf,
-        /// EDINETコードリストCSV（EdinetcodeDlInfo.csv）
         #[arg(long, value_name = "FILE")]
         codelist: PathBuf,
-        /// 出力Parquetファイルパス
         #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
         output: PathBuf,
     },
-    /// Parquet ファイルのスキーマ（列名・型）を表示
+    /// Parquet ファイルのスキーマと内容を表示
     Schema {
         #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
         input: PathBuf,
+        /// データを表示する
+        #[arg(long)]
+        show_data: bool,
+        /// 表示する列名（複数可、省略時は全列）
+        #[arg(long = "col", value_name = "COL")]
+        columns: Vec<String>,
+        /// 表示行数（デフォルト: 10）
+        #[arg(long, default_value = "10")]
+        limit: usize,
     },
     /// 有価証券報告書（XBRL）を取得
     Fetch {

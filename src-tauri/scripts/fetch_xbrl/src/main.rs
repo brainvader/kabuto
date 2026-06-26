@@ -3,7 +3,7 @@
 //! サブコマンド:
 //!   codelist  EDINETコードリストを取得して CSV に保存
 //!   master    東証上場銘柄一覧から個別株を抽出して Parquet に保存
-//!   schema    Parquet ファイルのスキーマを表示
+//!   schema    Parquet ファイルのスキーマと内容を表示
 //!   fetch     XBRL（有価証券報告書）を取得
 
 mod cli;
@@ -15,7 +15,6 @@ use clap::Parser;
 use cli::Command;
 
 fn main() -> Result<()> {
-    // Windows のコンソール出力を UTF-8 に設定
     #[cfg(target_os = "windows")]
     unsafe {
         windows_sys::Win32::System::Console::SetConsoleOutputCP(65001);
@@ -32,7 +31,12 @@ fn main() -> Result<()> {
     let cli = cli::Cli::parse();
 
     match cli.command {
-        Command::Schema { input } => cmd::schema::run(&input),
+        Command::Schema {
+            input,
+            show_data,
+            columns,
+            limit,
+        } => cmd::schema::run(&input, show_data, &columns, limit),
         Command::Master {
             jpx,
             codelist,
