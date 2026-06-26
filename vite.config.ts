@@ -1,25 +1,15 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import path from "node:path";
 import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import { playwright } from "@vitest/browser-playwright";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const host = process.env.TAURI_DEV_HOST;
+const isPlaywright = process.env.VITE_PLAYWRIGHT === 'true';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  resolve: {
-    alias: {
-      "@tauri-apps/api/core": path.resolve(__dirname, "./src/__mocks__/api-core.ts"),
-      "@": path.resolve(__dirname, "./src"),
-      "@hooks": path.resolve(__dirname, "./src/hooks"),
-      "@components": path.resolve(__dirname, "./src/components"),
-    },
-  },
   clearScreen: false,
   server: {
     port: 1420,
@@ -32,6 +22,19 @@ export default defineConfig({
       ignored: ["**/src-tauri/**"],
     },
   },
+  optimizeDeps: {
+    force: isPlaywright,
+  },
+  resolve: {
+    alias: [
+      ...(isPlaywright ? [
+        { find: '@tauri-apps/api/core', replacement: path.resolve(__dirname, './src/__mocks__/api-core.ts') },
+      ] : []),
+      { find: '@components', replacement: path.resolve(__dirname, './src/components') },
+      { find: '@hooks', replacement: path.resolve(__dirname, './src/hooks') },
+      { find: '@', replacement: path.resolve(__dirname, './src') },
+    ],
+  },
   test: {
     projects: [
       {
@@ -41,6 +44,7 @@ export default defineConfig({
           environment: 'jsdom',
           globals: true,
           setupFiles: ['./src/test-setup.ts'],
+          exclude: ['**/*.spec.ts', '**/node_modules/**'],
           include: ['src/**/*.test.{ts,tsx}'],
         },
       },

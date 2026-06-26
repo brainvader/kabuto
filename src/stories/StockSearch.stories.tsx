@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite'
 import { expect, userEvent, within } from 'storybook/test'
 import { fn } from 'storybook/test'
 
-import { StockSearch } from '@components/StockSearch'
+import { StockSearch } from '@/components/StockSearch'
 
 const meta: Meta<typeof StockSearch> = {
     component: StockSearch,
