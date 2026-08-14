@@ -4,7 +4,8 @@
 //!   codelist  EDINETコードリストを取得して CSV に保存
 //!   master    東証上場銘柄一覧から個別株を抽出して Parquet に保存
 //!   schema    Parquet ファイルのスキーマと内容を表示
-//!   fetch     XBRL（有価証券報告書）を取得
+//!   fetch     XBRL（有価証券報告書）を取得（取得済みの書類はスキップする）
+//!   sync      codelist → master → fetch を一括実行する（繰り返し実行しても安全）
 
 mod cli;
 mod cmd;
@@ -61,5 +62,14 @@ fn main() -> Result<()> {
             };
             cmd::fetch::run(&api_key, &filter, from, to, &output, debug)
         }
+        Command::Sync {
+            codelist_dir,
+            jpx,
+            master,
+            output,
+            from,
+            to,
+            debug,
+        } => cmd::sync::run(&codelist_dir, &jpx, &master, &output, from, to, debug),
     }
 }

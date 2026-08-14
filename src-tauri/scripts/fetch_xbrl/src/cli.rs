@@ -56,4 +56,24 @@ pub enum Command {
         #[arg(long)]
         debug: bool,
     },
+    /// codelist → master → fetch を一括実行し、個別株全件の有価証券報告書を取得する。
+    /// 既に取得済みの書類はスキップするため、繰り返し実行しても安全（冪等）。
+    Sync {
+        #[arg(long, value_name = "DIR", default_value = "data/codelist")]
+        codelist_dir: PathBuf,
+        #[arg(long, value_name = "FILE", default_value = "data/jpx/data_j.csv")]
+        jpx: PathBuf,
+        #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
+        master: PathBuf,
+        #[arg(long, value_name = "DIR", default_value = "data/xbrl")]
+        output: PathBuf,
+        /// 省略時は (to - 90日)
+        #[arg(long, value_name = "DATE")]
+        from: Option<NaiveDate>,
+        /// 省略時は今日
+        #[arg(long, value_name = "DATE")]
+        to: Option<NaiveDate>,
+        #[arg(long)]
+        debug: bool,
+    },
 }

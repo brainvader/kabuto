@@ -47,18 +47,29 @@ pub fn run(
                 }
 
                 for doc in matched {
+                    let edinet_code = doc.edinet_code.as_deref().unwrap_or("unknown");
+                    let out_dir = output_dir.join(edinet_code).join(&doc.doc_id);
+
+                    if already_fetched(&out_dir) {
+                        println!(
+                            "  - {} ({}) 取得済みのためスキップ",
+                            doc.filer_name.as_deref().unwrap_or("不明"),
+                            edinet_code,
+                        );
+                        continue;
+                    }
+
                     found += 1;
                     println!(
                         "  → {} ({}) {}",
                         doc.filer_name.as_deref().unwrap_or("不明"),
-                        doc.edinet_code.as_deref().unwrap_or("-"),
+                        edinet_code,
                         doc.doc_description.as_deref().unwrap_or(""),
                     );
                     if let (Some(ps), Some(pe)) = (&doc.period_start, &doc.period_end) {
                         println!("    期間: {} 〜 {}", ps, pe);
                     }
 
-                    let edinet_code = doc.edinet_code.as_deref().unwrap_or("unknown");
                     match download_and_extract(api_key, &doc.doc_id, edinet_code, output_dir) {
                         Ok(out_dir) => {
                             let xbrl_files = find_files_by_ext(&out_dir, "xbrl");
@@ -70,6 +81,10 @@ pub fn run(
                         }
                         Err(e) => eprintln!("  × ダウンロード失敗: {}", e),
                     }
+
+                    // EDINETへの配慮。日付ループ側のスリープとは別に、同日内で複数件
+                    // ダウンロードする場合にも間隔を空ける
+                    thread::sleep(time::Duration::from_millis(500));
                 }
             }
             Err(e) => eprintln!("  {} エラー: {}", date_str, e),
@@ -143,9 +158,45 @@ fn download_and_extract(
 
     let cursor = Cursor::new(bytes);
     let mut archive = ZipArchive::new(cursor)?;
-    archive.extract(&out_dir)?;
 
-    Ok(out_dir)
+    // PublicDoc配下の本編XBRLインスタンス1つだけを取り出す。AuditDoc・表示用HTML・
+    // 画像・タクソノミ拡張定義は今のパイプラインでは使わないため保存しない
+    // （2026/08/14/006.md、1書類あたり44ファイル→1ファイルに削減）。
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i)?;
+        let entry_name = entry.name().to_string();
+        let Some(file_name) = entry
+            .enclosed_name()
+            .and_then(|p| p.file_name().map(|f| f.to_os_string()))
+        else {
+            continue;
+        };
+        let file_name = file_name.to_string_lossy().to_string();
+
+        if is_main_instance_document(&entry_name, &file_name) {
+            let dest = out_dir.join(&file_name);
+            let mut out_file = fs::File::create(&dest)?;
+            std::io::copy(&mut entry, &mut out_file)?;
+            return Ok(out_dir);
+        }
+    }
+
+    anyhow::bail!("本編XBRLインスタンスが見つかりません: doc_id={}", doc_id)
+}
+
+/// PublicDoc配下の本編XBRLインスタンスドキュメントかどうかを判定する。
+/// 例: XBRL/PublicDoc/jpcrp030000-asr-001_E00540-000_2026-03-31_01_2026-06-09.xbrl
+/// AuditDoc側のファイルは "jpaud-" 接頭辞のため、これだけで判別できる。
+fn is_main_instance_document(entry_name: &str, file_name: &str) -> bool {
+    entry_name.contains("PublicDoc") && file_name.starts_with("jpcrp") && file_name.ends_with(".xbrl")
+}
+
+/// 書類の出力先ディレクトリに、展開済みのファイルが既に存在するかどうかを見て判定する。
+/// 冪等性の担保: 同じ期間・条件で再実行しても、未取得分だけがダウンロードされる。
+fn already_fetched(out_dir: &PathBuf) -> bool {
+    fs::read_dir(out_dir)
+        .map(|mut entries| entries.next().is_some())
+        .unwrap_or(false)
 }
 
 fn find_files_by_ext(dir: &PathBuf, ext: &str) -> Vec<PathBuf> {
