@@ -22,12 +22,12 @@
          ┌─────────────────────────────────────────────────────────────┐
          │  SurrealDB (file:kabuto.db)  ← シングルバイナリ、ネットワーク不要  │
          │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐  │
-         │  │ Graph層       │  │ Vector層      │  │ Document層        │  │
-         │  │ Company      │  │ XBRL自然言語  │  │ パイプライン定義   │  │
-         │  │ MacroIndicator│  │ Embedding    │  │ 検証結果          │  │
-         │  │ FinancialMetric│ │ <|COSINE|>  │  │                  │  │
-         │  │ BusinessRisk  │  │             │  │                  │  │
-         │  │ MarketEvent   │  │             │  │                  │  │
+         │  │ Graph層       │  │ Vector層      │  │ Decision層        │  │
+         │  │ Company      │  │ DisclosureText│  │ Trigger          │  │
+         │  │ MacroIndicator│  │ Embedding    │  │ Decision         │  │
+         │  │ FinancialMetric│ │ <|COSINE|>  │  │ DecisionSession   │  │
+         │  │ BusinessRisk  │  │             │  │ (根拠・仮説・結論  │  │
+         │  │ MarketEvent   │  │             │  │  を積み上げる)     │  │
          │  └──────────────┘  └──────────────┘  └──────────────────┘  │
          │  ↑ 単一クエリで Graph探索＋Vector検索＋フィルターを合成        │
          └─────────────────────────────────────────────────────────────┘
@@ -36,7 +36,12 @@
          │  株価時系列・銘柄マスタ ← Polars-rs で計算 (Tauri command)    │
          └─────────────────────────────────────────────────────────────┘
          共有キー: 証券コード（code）
-         SurrealDB ノード例: company:1605  macro:WTI  risk:supply_shortage
+         SurrealDB ノード例: company:1605  macro:WTI  decision_session:INPEX_buy_decision
+
+         設計方針（2026/08/15/005.md）:
+           Semanticaのcontext graph / provenance trackingの発想を土台にする。
+           Palantir的な承認ワークフロー・役割ベース権限は輸入しない
+           （kabutoには統治すべきAction＝自動実行される売買がそもそも無いため）。
          ================================================================ -->
 
     <!-- ================================================================
@@ -45,24 +50,59 @@
            company:{ code, name, sector, market, listed, country }
            macro:{ id, name, category, source }
              category: COMMODITY | INTEREST_RATE | INDEX | CURRENCY
-           financial_metric:{ company, name, value, unit, period, source:"xbrl" }
+
+           financial_metric:{ doc_id, metric, xbrl_tag, value, unit, fiscal_year, consolidated }
+             レコードID: ⟨doc_id⟩_⟨metric⟩_⟨fiscal_year⟩ の複合キー。
+             1つのXBRL提出書類（doc_id）から複数レコードが生成される（2026/08/14/005.md）。
+             metric は正規化した指標名、xbrl_tag は元のタクソノミ要素名（トレーサビリティ用）
+
+           disclosure_text:{ doc_id, section, fiscal_year, text, embedding }
+             レコードID: ⟨doc_id⟩_⟨section⟩。
+             embeddingはOpenAI text-embedding-3-small。対象は事業等のリスク等の自然言語
+             セクションのみ。short structured field（metric名等）は対象外
+             （短文embeddingは精度が粗く誤った近さを生む。2026/08/07/008.mdの知見）
+
            business_risk:{ company, description, category, confidence, source:"llm" }
            market_event:{ name, date, category }
 
+           trigger:{ type, description, source_ref, created_at }
+             type: human_note | news | disclosure_text_match | precedent_recall
+             「なぜこの仮説を思いついたか」という思考の切っ掛けを記録する（2026/08/15/003.md）
+
+           decision:{ hypothesis, method, result, based_on_doc_ids, computed_at }
+             result: { correlation, confirmed, lag_days }
+             based_on_doc_ids で financial_metric/disclosure_text の元データまで遡れる
+
+           decision_session:{ question, company, status, selection_mode, conclusion,
+                               action_taken, created_at, resolved_at }
+             status: exploring | resolved（分析プロセスの完了状態）
+             selection_mode: exclusive（排他的候補から1つ採用）
+                            | composite（複数要因を統合、AND合成）
+             action_taken: bought | sold | watched | none
+               （Palantir流の承認ゲートではなく、事後に振り返るための事実の記録。2026/08/15/004.md）
+
          Edge types (RELATE構文):
-           company->AFFECTED_BY->macro    { direction, confidence, confirmed, lag_days }
            company->HAS_METRIC->financial_metric
+           company->HAS_DISCLOSURE->disclosure_text
            company->HAS_RISK->business_risk
-           company->INVESTED_IN->company  { ratio }
+           company->INVESTED_IN->company        { ratio }
            macro->CORRELATES_WITH->macro
 
-         クエリ例（石油問題 → 関連企業の発見）:
+           trigger->PROMPTED->decision_session
+           decision_session->CONSIDERED->decision          { selected, rejection_reason }
+           decision_session->CONSIDERED->decision_session  { selected }
+             ← 入れ子可能。「買うべきか」という上位セッションが「マクロ感応度」
+               「財務健全性」「事業リスク」のサブセッションを CONSIDERED する、等
+               （旧 company->AFFECTED_BY->macro はこの decision_session の仕組みに
+                統合し廃止。相関の確定は decision.result として記録する）
+
+         クエリ例（石油問題 → 関連企業の発見。disclosure_textの自然言語セクションを起点にする）:
            SELECT code, name,
                   vector::distance::knn() AS relevance
            FROM company
-           WHERE id IN macro:WTI->AFFECTED_BY<-company
+           WHERE id IN (SELECT VALUE company FROM disclosure_text
+                        WHERE embedding <|100,COSINE|> $query_embedding)
              AND listed = true
-             AND embedding <|100,COSINE|> $query_embedding
            ORDER BY relevance DESC
            LIMIT 20
          ================================================================ -->
@@ -640,12 +680,12 @@
           <path d="M 830 135 C 860 135 860 220 680 240" stroke="#3b82f6" stroke-width="1.5" fill="none" opacity="0.6" />
         </svg>
 
-        <!-- SOURCE: SurrealDB → 石油影響企業 -->
+        <!-- SOURCE: SurrealDB → 石油影響企業（disclosure_textのリスク記述をベクトル検索） -->
         <div class="pipe-node node-source" style="left:60px; top:50px;">
           <div class="pipe-port right"></div>
           <div class="pipe-node-label">SOURCE</div>
           <div class="pipe-node-name">SurrealDB Query</div>
-          <div class="pipe-node-param">macro:WTI →AFFECTED_BY← company</div>
+          <div class="pipe-node-param">disclosure_text ~ "原油価格"</div>
           <div class="pipe-node-type">out: StockList</div>
         </div>
 
@@ -678,12 +718,12 @@
           <div class="pipe-node-type">in: StockList + TimeSeries → out: MetricResult</div>
         </div>
 
-        <!-- OUTPUT: テーブル -->
+        <!-- OUTPUT: テーブル（結果はdecision_sessionとして記録される） -->
         <div class="pipe-node node-output" style="left:490px; top:210px;">
           <div class="pipe-port left"></div>
           <div class="pipe-node-label">OUTPUT</div>
-          <div class="pipe-node-name">Table</div>
-          <div class="pipe-node-param">corr / confirmed / lag_days</div>
+          <div class="pipe-node-name">Table → decision_session</div>
+          <div class="pipe-node-param">corr / confirmed / lag_days を decision として記録</div>
           <div class="pipe-node-type">in: MetricResult → Visualization</div>
         </div>
 
@@ -695,7 +735,7 @@
          src/components/MetricsPanel.tsx
          src/hooks/useMetrics.ts
          DB: price.parquet（Polars-rs, get_price_data Tauri command）
-             SurrealDB（confirmed エッジの取得）
+             SurrealDB（decision.result の取得。confirmed=trueのdecisionをオーバーレイ表示）
 
          [Feature] 選択銘柄のローソク足チャートを表示する
          [Feature] KPI（現在値・前日比・高値・安値・出来高）を表示する
@@ -752,7 +792,7 @@
       <div class="metrics-section">
         <div class="panel-header">
           <span class="panel-title">Macro Overlay · WTI</span>
-          <span class="badge badge-db-ok">SurrealDB confirmed</span>
+          <span class="badge badge-db-ok">decision: confirmed</span>
         </div>
         <div class="chart-placeholder">
           [ WTI 日次 vs INPEX 株価 · 相関 0.82 ]
