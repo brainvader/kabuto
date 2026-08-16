@@ -26,6 +26,8 @@ polars = { version = "0.46", features = [
     "regex",
 ] }
 unicode-normalization = "0.1"
+quick-xml = "0.37"
+regex = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }

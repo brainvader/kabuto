@@ -5,6 +5,7 @@
 //!   master    東証上場銘柄一覧から個別株を抽出して Parquet に保存
 //!   schema    Parquet ファイルのスキーマと内容を表示
 //!   fetch     XBRL（有価証券報告書）を取得（取得済みの書類はスキップする）
+//!   parse     取得済みXBRLから financial_metric/disclosure_text を抽出する（APIなし）
 //!   sync      codelist → master → fetch を一括実行する（繰り返し実行しても安全）
 
 mod cli;
@@ -62,6 +63,7 @@ fn main() -> Result<()> {
             };
             cmd::fetch::run(&api_key, &filter, from, to, &output, debug)
         }
+        Command::Parse { input, output } => cmd::parse::run(&input, &output),
         Command::Sync {
             codelist_dir,
             jpx,

@@ -56,6 +56,14 @@ pub enum Command {
         #[arg(long)]
         debug: bool,
     },
+    /// 取得済みXBRLの本編インスタンスから financial_metric/disclosure_text 相当の
+    /// データを抽出し、中間ファイル（JSON Lines）に書き出す。APIは呼ばない。
+    Parse {
+        #[arg(long, value_name = "DIR", default_value = "data/xbrl")]
+        input: PathBuf,
+        #[arg(long, value_name = "DIR", default_value = "data")]
+        output: PathBuf,
+    },
     /// codelist → master → fetch を一括実行し、個別株全件の有価証券報告書を取得する。
     /// 既に取得済みの書類はスキップするため、繰り返し実行しても安全（冪等）。
     Sync {
