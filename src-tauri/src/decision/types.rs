@@ -46,6 +46,20 @@ fn default_action_taken() -> String {
     "none".to_string()
 }
 
+/// list_decision_sessions の1行分。DecisionSession に record id を加えたもの
+/// （一覧からセッションを選ぶUIにはidが必須だが、CONTENT書き込みに使う
+/// DecisionSession自体にはSCHEMAFULL上idフィールドが無いため分けている）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DecisionSessionSummary {
+    pub id: String,
+    pub question: String,
+    pub company: Option<String>,
+    pub status: String,
+    pub selection_mode: String,
+    pub conclusion: Option<String>,
+    pub action_taken: String,
+}
+
 /// decision_session の CONSIDERED エッジ1本分。target は "decision:xxx" | "decision_session:xxx"
 /// 形式のレコード参照文字列（呼び出し側が ':' で table/id に分解する）。
 #[derive(Debug, Clone, Serialize, Deserialize)]

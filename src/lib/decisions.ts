@@ -34,6 +34,11 @@ export interface ConsideredEdge {
     rejection_reason: string | null
 }
 
+/** list_decision_sessions_cmd の1件分。DecisionSession + record id */
+export interface DecisionSessionSummary extends DecisionSession {
+    id: string
+}
+
 export function fetchDecisionSession(id: string): Promise<DecisionSession | null> {
     return invoke('get_decision_session_cmd', { id })
 }
@@ -46,7 +51,7 @@ export function fetchConsidered(sessionId: string): Promise<ConsideredEdge[]> {
     return invoke('list_considered_cmd', { sessionId })
 }
 
-export function listDecisionSessions(): Promise<DecisionSession[]> {
+export function listDecisionSessions(): Promise<DecisionSessionSummary[]> {
     return invoke('list_decision_sessions_cmd')
 }
 

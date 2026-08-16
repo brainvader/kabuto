@@ -1,7 +1,7 @@
 //! decision モジュールを Tauri command として公開する層（2026/08/15/007.md Step 6）。
 
 use super::store;
-use super::types::{ConsideredEdge, Decision, DecisionSession, Trigger};
+use super::types::{ConsideredEdge, Decision, DecisionSession, DecisionSessionSummary, Trigger};
 use crate::runtime;
 use uuid::Uuid;
 
@@ -82,7 +82,7 @@ pub fn get_decision_session_cmd(id: String) -> Result<Option<DecisionSession>, S
 }
 
 #[tauri::command]
-pub fn list_decision_sessions_cmd() -> Result<Vec<DecisionSession>, String> {
+pub fn list_decision_sessions_cmd() -> Result<Vec<DecisionSessionSummary>, String> {
     runtime()
         .block_on(store::list_decision_sessions())
         .map_err(|e| e.to_string())

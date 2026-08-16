@@ -1,6 +1,6 @@
 //! decision / decision_session / trigger のSurrealDB読み書き。
 
-use super::types::{ConsideredEdge, Decision, DecisionSession, Trigger};
+use super::types::{ConsideredEdge, Decision, DecisionSession, DecisionSessionSummary, Trigger};
 use crate::db;
 use anyhow::Result;
 
@@ -97,9 +97,14 @@ pub async fn list_considered(session_id: &str) -> Result<Vec<ConsideredEdge>> {
     Ok(resp.take(0)?)
 }
 
-pub async fn list_decision_sessions() -> Result<Vec<DecisionSession>> {
+/// 一覧表示用にrecord idも含めて返す。DecisionSession自体（CONTENT書き込みに使う型）
+/// にidフィールドを足すとSCHEMAFULLの検証に引っかかるため、別型で返す。
+pub async fn list_decision_sessions() -> Result<Vec<DecisionSessionSummary>> {
     let mut resp = db()
-        .query("SELECT * FROM decision_session ORDER BY created_at DESC")
+        .query(
+            "SELECT question, company, status, selection_mode, conclusion, action_taken, <string>id AS id \
+             FROM decision_session ORDER BY created_at DESC",
+        )
         .await?;
     Ok(resp.take(0)?)
 }
@@ -183,6 +188,41 @@ mod tests {
             assert_eq!(rows[0].target, "decision:dec1");
             assert!(rows[0].selected);
             assert_eq!(rows[0].rejection_reason, None);
+        });
+    }
+
+    #[test]
+    fn list_decision_sessions_includes_record_id() {
+        runtime().block_on(async {
+            let db = isolated_db("data/test_list_sessions.db").await;
+
+            db.query("UPSERT type::thing('decision_session', 'sessA') CONTENT { question: 'qA', status: 'exploring', selection_mode: 'exclusive', action_taken: 'none' }")
+                .await
+                .expect("upsert失敗")
+                .check()
+                .expect("upsertにクエリエラー");
+            db.query("UPSERT type::thing('decision_session', 'sessB') CONTENT { question: 'qB', status: 'resolved', selection_mode: 'composite', action_taken: 'bought' }")
+                .await
+                .expect("upsert失敗")
+                .check()
+                .expect("upsertにクエリエラー");
+
+            let mut resp = db
+                .query(
+                    "SELECT question, company, status, selection_mode, conclusion, action_taken, <string>id AS id \
+                     FROM decision_session ORDER BY question ASC",
+                )
+                .await
+                .expect("list_decision_sessions クエリ失敗")
+                .check()
+                .expect("list_decision_sessionsにクエリエラー");
+            let rows: Vec<super::super::types::DecisionSessionSummary> = resp.take(0).expect("デシリアライズ失敗");
+
+            assert_eq!(rows.len(), 2);
+            assert_eq!(rows[0].id, "decision_session:sessA");
+            assert_eq!(rows[0].question, "qA");
+            assert_eq!(rows[1].id, "decision_session:sessB");
+            assert_eq!(rows[1].action_taken, "bought");
         });
     }
 }

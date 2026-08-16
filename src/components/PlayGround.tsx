@@ -10,13 +10,15 @@ import '@xyflow/react/dist/style.css'
 import { useKabutoStore } from '@/store/useKabutoStore'
 import { nodeTypes } from '@/components/nodes/nodeTypes'
 import type { CompanyNodeData } from '@/components/nodes/CompanyNode'
+import { DecisionSessionsPanel } from '@/components/DecisionSessionsPanel'
 
-type Tab = 'GRAPH' | 'RESULT'
+type Tab = 'GRAPH' | 'RESULT' | 'DECISION'
 
 /**
  * PlayGround パネル
  * - GRAPH タブ: 選択銘柄ノードを @xyflow/react キャンバスに表示
  * - RESULT タブ: 分析結果の表示（後続実装）
+ * - DECISION タブ: 記録済みの decision_session を一覧・グラフ表示（007.md Step 7）
  */
 export function PlayGround() {
     const [activeTab, setActiveTab] = useState<Tab>('GRAPH')
@@ -38,7 +40,7 @@ export function PlayGround() {
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
             {/* タブバー */}
             <div role="tablist" style={{ display: 'flex', gap: 2, padding: '6px 10px', background: '#13161f', borderBottom: '1px solid #1e2333', flexShrink: 0 }}>
-                {(['GRAPH', 'RESULT'] as Tab[]).map((tab) => (
+                {(['GRAPH', 'RESULT', 'DECISION'] as Tab[]).map((tab) => (
                     <button
                         key={tab}
                         role="tab"
@@ -97,6 +99,13 @@ export function PlayGround() {
                     style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#374151', fontSize: 12, fontFamily: 'monospace' }}
                 >
                     RESULT AREA
+                </div>
+            )}
+
+            {/* DECISION タブ */}
+            {activeTab === 'DECISION' && (
+                <div data-testid="playground-decision" style={{ flex: 1, position: 'relative' }}>
+                    <DecisionSessionsPanel />
                 </div>
             )}
         </div>
