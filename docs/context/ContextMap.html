@@ -819,5 +819,30 @@
 
     </footer>
 
+    <!-- ════════════════════════════════════════════════════
+         CTX-4: DECISION GRAPH VIEW（2026/08/15/007.md Step 7で実装済み。
+         App.tsx の3パネルレイアウトへの組み込みはまだ未着手 — 現状はスタンドアロン
+         コンポーネントとして src/stories/DecisionGraphView.stories.tsx から確認できる）
+
+         src/components/DecisionGraphView.tsx
+         src/components/nodes/DecisionSessionNode.tsx
+         src/components/nodes/DecisionLeafNode.tsx
+         src/domain/decisionSession.ts   ← 純粋関数（tree構築・レイアウト・target文字列パース）
+         src/lib/decisions.ts            ← Tauri invoke() の薄いラッパー
+         DB: SurrealDB（decision_session / decision / considered）
+
+         [Feature] rootSessionId から起点の decision_session を表示する
+         [Feature] decision_session ノードをクリックすると CONSIDERED エッジをたどって
+                   子（decision または入れ子の decision_session）を展開する
+         [Feature] 同じノードを再クリックすると折りたたむ（取得済みエッジはキャッシュ再利用）
+         [Feature] どのノードをクリックしても下部のJSONパネルに生データを表示する
+                   （decision-flow.htmlモックアップと同じ操作感）
+         [Feature] decision ノードは CONSIDERED.selected の値で採用(緑)/却下(赤・理由表示)を色分けする
+
+         local state:
+           expanded: Set<string>              ← 展開中の decision_session id
+           selected: { table, id, data } | null ← JSONパネルに表示中のレコード
+    ════════════════════════════════════════════════════════ -->
+
   </body>
 </html>
