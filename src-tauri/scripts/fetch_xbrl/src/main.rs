@@ -6,6 +6,7 @@
 //!   schema    Parquet ファイルのスキーマと内容を表示
 //!   fetch     XBRL（有価証券報告書）を取得（取得済みの書類はスキップする）
 //!   parse     取得済みXBRLから financial_metric/disclosure_text を抽出する（APIなし）
+//!   ingest    parseの出力をSurrealDBへ投入する（disclosure_textはOpenAIでembedding）
 //!   sync      codelist → master → fetch を一括実行する（繰り返し実行しても安全）
 
 mod cli;
@@ -64,6 +65,7 @@ fn main() -> Result<()> {
             cmd::fetch::run(&api_key, &filter, from, to, &output, debug)
         }
         Command::Parse { input, output } => cmd::parse::run(&input, &output),
+        Command::Ingest { input, db } => cmd::ingest::run(&input, &db),
         Command::Sync {
             codelist_dir,
             jpx,

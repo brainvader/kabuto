@@ -64,6 +64,15 @@ pub enum Command {
         #[arg(long, value_name = "DIR", default_value = "data")]
         output: PathBuf,
     },
+    /// parseの出力をSurrealDBへ投入する。disclosure_textは未embeddingのものだけ
+    /// OpenAIでembeddingしてから投入する（既存分はスキップ、冪等）。
+    /// アプリ本体（Tauri）を起動したまま実行しないこと。
+    Ingest {
+        #[arg(long, value_name = "DIR", default_value = "data")]
+        input: PathBuf,
+        #[arg(long, value_name = "FILE", default_value = "../../data/kabuto.db")]
+        db: PathBuf,
+    },
     /// codelist → master → fetch を一括実行し、個別株全件の有価証券報告書を取得する。
     /// 既に取得済みの書類はスキップするため、繰り返し実行しても安全（冪等）。
     Sync {

@@ -28,6 +28,8 @@ polars = { version = "0.46", features = [
 unicode-normalization = "0.1"
 quick-xml = "0.37"
 regex = "1"
+surrealdb = { version = "2", features = ["kv-surrealkv"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console"] }
