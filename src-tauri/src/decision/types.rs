@@ -46,6 +46,15 @@ fn default_action_taken() -> String {
     "none".to_string()
 }
 
+/// decision_session の CONSIDERED エッジ1本分。target は "decision:xxx" | "decision_session:xxx"
+/// 形式のレコード参照文字列（呼び出し側が ':' で table/id に分解する）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsideredEdge {
+    pub target: String,
+    pub selected: bool,
+    pub rejection_reason: Option<String>,
+}
+
 /// 「なぜこの仮説を思いついたか」という思考の切っ掛け（08/15/003.md）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Trigger {

@@ -1,9 +1,9 @@
 mod decision;
 
 use decision::commands::{
-    create_decision_cmd, create_decision_session_cmd, create_trigger_cmd,
-    get_decision_session_cmd, list_decision_sessions_cmd, relate_considered_cmd,
-    relate_prompted_cmd, resolve_decision_session_cmd,
+    create_decision_cmd, create_decision_session_cmd, create_trigger_cmd, get_decision_cmd,
+    get_decision_session_cmd, list_considered_cmd, list_decision_sessions_cmd,
+    relate_considered_cmd, relate_prompted_cmd, resolve_decision_session_cmd,
 };
 use polars::prelude::*;
 use serde::Serialize;
@@ -209,6 +209,8 @@ pub fn run() {
             resolve_decision_session_cmd,
             get_decision_session_cmd,
             list_decision_sessions_cmd,
+            get_decision_cmd,
+            list_considered_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

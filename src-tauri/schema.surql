@@ -71,15 +71,16 @@ DEFINE FIELD OVERWRITE created_at     ON TABLE decision_session TYPE datetime DE
 DEFINE FIELD OVERWRITE resolved_at    ON TABLE decision_session TYPE option<datetime>;
 
 -- RELATE エッジ
+-- TYPE RELATION を付けないと RELATE 時に TableCheck エラーになる（NORMAL テーブル扱いのため）。
 -- has_metric / has_disclosure: company が持つ財務データ・開示テキストへの参照
-DEFINE TABLE OVERWRITE has_metric SCHEMAFULL;
-DEFINE TABLE OVERWRITE has_disclosure SCHEMAFULL;
+DEFINE TABLE OVERWRITE has_metric TYPE RELATION SCHEMAFULL;
+DEFINE TABLE OVERWRITE has_disclosure TYPE RELATION SCHEMAFULL;
 
 -- prompted: trigger が decision_session を誘発したことを表す
-DEFINE TABLE OVERWRITE prompted SCHEMAFULL;
+DEFINE TABLE OVERWRITE prompted TYPE RELATION SCHEMAFULL;
 
 -- considered: decision_session が検討した候補。decision にも decision_session にも
 -- RELATE できる（ネストした判断を許容するため、IN/OUTの型は固定しない）。
-DEFINE TABLE OVERWRITE considered SCHEMAFULL;
+DEFINE TABLE OVERWRITE considered TYPE RELATION SCHEMAFULL;
 DEFINE FIELD OVERWRITE selected         ON TABLE considered TYPE bool;
 DEFINE FIELD OVERWRITE rejection_reason ON TABLE considered TYPE option<string>;
