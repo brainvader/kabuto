@@ -81,3 +81,21 @@ pub async fn list_decision_sessions() -> Result<Vec<DecisionSession>> {
         .await?;
     Ok(resp.take(0)?)
 }
+
+/// decision_session に結論を確定させる（status を "resolved" にし、resolved_at を刻む）。
+pub async fn resolve_decision_session(
+    id: &str,
+    conclusion: &str,
+    action_taken: &str,
+) -> Result<()> {
+    db()
+        .query(
+            "UPDATE type::thing('decision_session', $id) SET \
+             status = 'resolved', conclusion = $conclusion, action_taken = $action_taken, resolved_at = time::now()",
+        )
+        .bind(("id", id.to_string()))
+        .bind(("conclusion", conclusion.to_string()))
+        .bind(("action_taken", action_taken.to_string()))
+        .await?;
+    Ok(())
+}

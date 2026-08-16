@@ -23,6 +23,7 @@ serde_json = "1"
 anyhow = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 surrealdb = { version = "2", features = ["kv-surrealkv"] }
+uuid = { version = "1", features = ["v4"] }
 polars = { version = "0.46", features = [
     "parquet",
     "lazy",

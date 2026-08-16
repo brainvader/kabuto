@@ -1,5 +1,10 @@
 mod decision;
 
+use decision::commands::{
+    create_decision_cmd, create_decision_session_cmd, create_trigger_cmd,
+    get_decision_session_cmd, list_decision_sessions_cmd, relate_considered_cmd,
+    relate_prompted_cmd, resolve_decision_session_cmd,
+};
 use polars::prelude::*;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -193,7 +198,18 @@ mod tests {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![init_db, search_stocks])
+        .invoke_handler(tauri::generate_handler![
+            init_db,
+            search_stocks,
+            create_trigger_cmd,
+            create_decision_session_cmd,
+            create_decision_cmd,
+            relate_prompted_cmd,
+            relate_considered_cmd,
+            resolve_decision_session_cmd,
+            get_decision_session_cmd,
+            list_decision_sessions_cmd,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
