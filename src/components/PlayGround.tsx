@@ -71,7 +71,7 @@ export function PlayGround() {
                     {selection === null ? (
                         <div
                             data-testid="playground-empty"
-                            style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#374151', fontSize: 12, fontFamily: 'monospace' }}
+                            style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 12, fontFamily: 'monospace' }}
                         >
                             銘柄を選択してください
                         </div>
@@ -96,7 +96,7 @@ export function PlayGround() {
             {activeTab === 'RESULT' && (
                 <div
                     data-testid="playground-result"
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#374151', fontSize: 12, fontFamily: 'monospace' }}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 12, fontFamily: 'monospace' }}
                 >
                     RESULT AREA
                 </div>

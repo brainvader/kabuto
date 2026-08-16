@@ -6,6 +6,7 @@ use anyhow::Result;
 
 pub async fn create_decision(id: &str, decision: &Decision) -> Result<()> {
     db()
+        .await
         .query("UPSERT type::thing('decision', $id) CONTENT $data")
         .bind(("id", id.to_string()))
         .bind(("data", decision.clone()))
@@ -15,6 +16,7 @@ pub async fn create_decision(id: &str, decision: &Decision) -> Result<()> {
 
 pub async fn create_decision_session(id: &str, session: &DecisionSession) -> Result<()> {
     db()
+        .await
         .query("UPSERT type::thing('decision_session', $id) CONTENT $data")
         .bind(("id", id.to_string()))
         .bind(("data", session.clone()))
@@ -24,6 +26,7 @@ pub async fn create_decision_session(id: &str, session: &DecisionSession) -> Res
 
 pub async fn create_trigger(id: &str, trigger: &Trigger) -> Result<()> {
     db()
+        .await
         .query("UPSERT type::thing('trigger', $id) CONTENT $data")
         .bind(("id", id.to_string()))
         .bind(("data", trigger.clone()))
@@ -41,6 +44,7 @@ pub async fn relate_considered(
     rejection_reason: Option<&str>,
 ) -> Result<()> {
     db()
+        .await
         .query(
             "RELATE (type::thing('decision_session', $session))->considered->(type::thing($table, $target)) \
              SET selected = $selected, rejection_reason = $reason",
@@ -57,6 +61,7 @@ pub async fn relate_considered(
 /// trigger が decision_session を誘発したことを表すエッジを張る。
 pub async fn relate_prompted(trigger_id: &str, session_id: &str) -> Result<()> {
     db()
+        .await
         .query(
             "RELATE (type::thing('trigger', $trigger))->prompted->(type::thing('decision_session', $session))",
         )
@@ -68,6 +73,7 @@ pub async fn relate_prompted(trigger_id: &str, session_id: &str) -> Result<()> {
 
 pub async fn get_decision_session(id: &str) -> Result<Option<DecisionSession>> {
     let mut resp = db()
+        .await
         .query("SELECT * FROM type::thing('decision_session', $id)")
         .bind(("id", id.to_string()))
         .await?;
@@ -77,6 +83,7 @@ pub async fn get_decision_session(id: &str) -> Result<Option<DecisionSession>> {
 
 pub async fn get_decision(id: &str) -> Result<Option<Decision>> {
     let mut resp = db()
+        .await
         .query("SELECT * FROM type::thing('decision', $id)")
         .bind(("id", id.to_string()))
         .await?;
@@ -88,6 +95,7 @@ pub async fn get_decision(id: &str) -> Result<Option<Decision>> {
 /// out はレコードリンクを文字列にキャストして返す（呼び出し側で table/id に分解する）。
 pub async fn list_considered(session_id: &str) -> Result<Vec<ConsideredEdge>> {
     let mut resp = db()
+        .await
         .query(
             "SELECT selected, rejection_reason, <string>out AS target FROM considered \
              WHERE in = type::thing('decision_session', $id)",
@@ -101,6 +109,7 @@ pub async fn list_considered(session_id: &str) -> Result<Vec<ConsideredEdge>> {
 /// にidフィールドを足すとSCHEMAFULLの検証に引っかかるため、別型で返す。
 pub async fn list_decision_sessions() -> Result<Vec<DecisionSessionSummary>> {
     let mut resp = db()
+        .await
         .query(
             "SELECT question, company, status, selection_mode, conclusion, action_taken, <string>id AS id \
              FROM decision_session ORDER BY created_at DESC",
@@ -116,6 +125,7 @@ pub async fn resolve_decision_session(
     action_taken: &str,
 ) -> Result<()> {
     db()
+        .await
         .query(
             "UPDATE type::thing('decision_session', $id) SET \
              status = 'resolved', conclusion = $conclusion, action_taken = $action_taken, resolved_at = time::now()",
@@ -134,7 +144,6 @@ pub async fn resolve_decision_session(
 // （lib.rs の schema_sql_applies_without_error と同じ考え方）。
 #[cfg(test)]
 mod tests {
-    use crate::runtime;
     use surrealdb::engine::local::{Db, SurrealKv};
     use surrealdb::Surreal;
 
@@ -154,75 +163,71 @@ mod tests {
         db
     }
 
-    #[test]
-    fn list_considered_returns_related_targets_as_strings() {
-        runtime().block_on(async {
-            let db = isolated_db("data/test_considered.db").await;
+    #[tokio::test]
+    async fn list_considered_returns_related_targets_as_strings() {
+        let db = isolated_db("data/test_considered.db").await;
 
-            db.query("UPSERT type::thing('decision_session', 'sess1') CONTENT { question: 'q', status: 'exploring', selection_mode: 'exclusive', action_taken: 'none' }")
-                .await
-                .expect("session upsert失敗")
-                .check()
-                .expect("session upsertにクエリエラー");
-            db.query("UPSERT type::thing('decision', 'dec1') CONTENT { hypothesis: 'h', method: 'pearson', confirmed: true, based_on_doc_ids: [] }")
-                .await
-                .expect("decision upsert失敗")
-                .check()
-                .expect("decision upsertにクエリエラー");
-            db.query(
-                "RELATE (type::thing('decision_session', 'sess1'))->considered->(type::thing('decision', 'dec1')) \
-                 SET selected = true, rejection_reason = NONE",
-            )
+        db.query("UPSERT type::thing('decision_session', 'sess1') CONTENT { question: 'q', status: 'exploring', selection_mode: 'exclusive', action_taken: 'none' }")
             .await
-            .expect("relate失敗")
+            .expect("session upsert失敗")
             .check()
-            .expect("relateにクエリエラー");
+            .expect("session upsertにクエリエラー");
+        db.query("UPSERT type::thing('decision', 'dec1') CONTENT { hypothesis: 'h', method: 'pearson', confirmed: true, based_on_doc_ids: [] }")
+            .await
+            .expect("decision upsert失敗")
+            .check()
+            .expect("decision upsertにクエリエラー");
+        db.query(
+            "RELATE (type::thing('decision_session', 'sess1'))->considered->(type::thing('decision', 'dec1')) \
+             SET selected = true, rejection_reason = NONE",
+        )
+        .await
+        .expect("relate失敗")
+        .check()
+        .expect("relateにクエリエラー");
 
-            let mut resp = db
-                .query("SELECT selected, rejection_reason, <string>out AS target FROM considered WHERE in = type::thing('decision_session', 'sess1')")
-                .await
-                .expect("list_considered クエリ失敗");
-            let rows: Vec<super::super::types::ConsideredEdge> = resp.take(0).expect("デシリアライズ失敗");
+        let mut resp = db
+            .query("SELECT selected, rejection_reason, <string>out AS target FROM considered WHERE in = type::thing('decision_session', 'sess1')")
+            .await
+            .expect("list_considered クエリ失敗");
+        let rows: Vec<super::super::types::ConsideredEdge> = resp.take(0).expect("デシリアライズ失敗");
 
-            assert_eq!(rows.len(), 1);
-            assert_eq!(rows[0].target, "decision:dec1");
-            assert!(rows[0].selected);
-            assert_eq!(rows[0].rejection_reason, None);
-        });
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].target, "decision:dec1");
+        assert!(rows[0].selected);
+        assert_eq!(rows[0].rejection_reason, None);
     }
 
-    #[test]
-    fn list_decision_sessions_includes_record_id() {
-        runtime().block_on(async {
-            let db = isolated_db("data/test_list_sessions.db").await;
+    #[tokio::test]
+    async fn list_decision_sessions_includes_record_id() {
+        let db = isolated_db("data/test_list_sessions.db").await;
 
-            db.query("UPSERT type::thing('decision_session', 'sessA') CONTENT { question: 'qA', status: 'exploring', selection_mode: 'exclusive', action_taken: 'none' }")
-                .await
-                .expect("upsert失敗")
-                .check()
-                .expect("upsertにクエリエラー");
-            db.query("UPSERT type::thing('decision_session', 'sessB') CONTENT { question: 'qB', status: 'resolved', selection_mode: 'composite', action_taken: 'bought' }")
-                .await
-                .expect("upsert失敗")
-                .check()
-                .expect("upsertにクエリエラー");
+        db.query("UPSERT type::thing('decision_session', 'sessA') CONTENT { question: 'qA', status: 'exploring', selection_mode: 'exclusive', action_taken: 'none' }")
+            .await
+            .expect("upsert失敗")
+            .check()
+            .expect("upsertにクエリエラー");
+        db.query("UPSERT type::thing('decision_session', 'sessB') CONTENT { question: 'qB', status: 'resolved', selection_mode: 'composite', action_taken: 'bought' }")
+            .await
+            .expect("upsert失敗")
+            .check()
+            .expect("upsertにクエリエラー");
 
-            let mut resp = db
-                .query(
-                    "SELECT question, company, status, selection_mode, conclusion, action_taken, <string>id AS id \
-                     FROM decision_session ORDER BY question ASC",
-                )
-                .await
-                .expect("list_decision_sessions クエリ失敗")
-                .check()
-                .expect("list_decision_sessionsにクエリエラー");
-            let rows: Vec<super::super::types::DecisionSessionSummary> = resp.take(0).expect("デシリアライズ失敗");
+        let mut resp = db
+            .query(
+                "SELECT question, company, status, selection_mode, conclusion, action_taken, <string>id AS id \
+                 FROM decision_session ORDER BY question ASC",
+            )
+            .await
+            .expect("list_decision_sessions クエリ失敗")
+            .check()
+            .expect("list_decision_sessionsにクエリエラー");
+        let rows: Vec<super::super::types::DecisionSessionSummary> = resp.take(0).expect("デシリアライズ失敗");
 
-            assert_eq!(rows.len(), 2);
-            assert_eq!(rows[0].id, "decision_session:sessA");
-            assert_eq!(rows[0].question, "qA");
-            assert_eq!(rows[1].id, "decision_session:sessB");
-            assert_eq!(rows[1].action_taken, "bought");
-        });
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "decision_session:sessA");
+        assert_eq!(rows[0].question, "qA");
+        assert_eq!(rows[1].id, "decision_session:sessB");
+        assert_eq!(rows[1].action_taken, "bought");
     }
 }

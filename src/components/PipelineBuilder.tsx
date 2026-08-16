@@ -46,7 +46,7 @@ export function PipelineBuilder() {
             {activeTab === 'BUILDER' && (
                 <div
                     data-testid="pipeline-canvas"
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#374151', fontSize: 12, fontFamily: 'monospace' }}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 12, fontFamily: 'monospace' }}
                 >
                     CANVAS AREA
                 </div>
@@ -54,7 +54,7 @@ export function PipelineBuilder() {
             {activeTab === 'RESULT' && (
                 <div
                     data-testid="pipeline-result"
-                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#374151', fontSize: 12, fontFamily: 'monospace' }}
+                    style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280', fontSize: 12, fontFamily: 'monospace' }}
                 >
                     RESULT AREA
                 </div>

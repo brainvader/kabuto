@@ -52,7 +52,7 @@ export function DecisionSessionsPanel({
                 {sessions.length === 0 ? (
                     <div
                         data-testid="decision-session-empty"
-                        style={{ padding: 12, color: '#374151', fontSize: 11, fontFamily: 'monospace', lineHeight: 1.6 }}
+                        style={{ padding: 12, color: '#6b7280', fontSize: 11, fontFamily: 'monospace', lineHeight: 1.6 }}
                     >
                         記録された意思決定セッションはまだありません
                     </div>
@@ -95,7 +95,7 @@ export function DecisionSessionsPanel({
                             alignItems: 'center',
                             justifyContent: 'center',
                             height: '100%',
-                            color: '#374151',
+                            color: '#6b7280',
                             fontSize: 12,
                             fontFamily: 'monospace',
                         }}
