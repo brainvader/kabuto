@@ -1,10 +1,12 @@
 mod decision;
+mod financial_data;
 
 use decision::commands::{
     create_decision_cmd, create_decision_session_cmd, create_trigger_cmd, get_decision_cmd,
     get_decision_session_cmd, list_considered_cmd, list_decision_sessions_cmd,
     relate_considered_cmd, relate_prompted_cmd, resolve_decision_session_cmd,
 };
+use financial_data::commands::list_financial_metrics_cmd;
 use polars::prelude::*;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -203,6 +205,7 @@ pub fn run() {
             list_decision_sessions_cmd,
             get_decision_cmd,
             list_considered_cmd,
+            list_financial_metrics_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
