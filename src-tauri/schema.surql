@@ -29,7 +29,8 @@ DEFINE FIELD OVERWRITE value        ON TABLE financial_metric TYPE float;
 DEFINE FIELD OVERWRITE unit         ON TABLE financial_metric TYPE string;
 DEFINE FIELD OVERWRITE fiscal_year  ON TABLE financial_metric TYPE int;
 DEFINE FIELD OVERWRITE consolidated ON TABLE financial_metric TYPE bool;
-DEFINE INDEX OVERWRITE financial_metric_doc_id       ON TABLE financial_metric COLUMNS doc_id;
+-- company_codeのみインデックス化する（ダッシュボードの銘柄別検索用）。doc_idは主キー
+-- 直接指定でアクセスするため不要（2026/08/17/003.md：検索ベース更新のO(n²)バグの教訓）。
 DEFINE INDEX OVERWRITE financial_metric_company_code ON TABLE financial_metric COLUMNS company_code;
 
 -- disclosure_text ノード（2026/08/14/005.md）
@@ -42,7 +43,8 @@ DEFINE FIELD OVERWRITE section     ON TABLE disclosure_text TYPE string;
 DEFINE FIELD OVERWRITE fiscal_year ON TABLE disclosure_text TYPE int;
 DEFINE FIELD OVERWRITE text        ON TABLE disclosure_text TYPE string;
 DEFINE FIELD OVERWRITE embedding   ON TABLE disclosure_text TYPE array<float>;
-DEFINE INDEX OVERWRITE disclosure_text_doc_id       ON TABLE disclosure_text COLUMNS doc_id;
+-- company_codeのみインデックス化する。doc_idは主キー直接指定でアクセスするため不要
+-- （2026/08/17/003.md：検索ベース更新のO(n²)バグの教訓）。
 DEFINE INDEX OVERWRITE disclosure_text_company_code ON TABLE disclosure_text COLUMNS company_code;
 
 -- trigger ノード（2026/08/15/003.md）
