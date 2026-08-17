@@ -173,28 +173,32 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
 /// 既にembedding済み（= 上のembed_batchでスキップされた）disclosure_textにも
 /// company_codeを反映する。embeddingの再計算を避けるため、CONTENTでの
 /// 全体上書きではなくフィールド単位のUPDATEにする（2026/08/16/002.md）。
+///
+/// レコードIDは ⟨doc_id⟩_⟨section⟩ で決定的に分かっているため、`WHERE doc_id = ...`
+/// のような検索ベースの更新はしない。doc_id列にインデックスが無い状態でこれを
+/// やった結果、実データ（34,429件）に対して2,372回のフルスキャンが発生し、
+/// 完了しないほど遅くなった実測結果がある（2026/08/17/003.md）。主キー直接指定なら
+/// テーブルサイズに関係なく高速。
 async fn backfill_company_code(db: &Surreal<Db>, rows: &[DisclosureTextRow]) -> Result<()> {
-    let mut by_doc: std::collections::HashMap<&str, Option<&str>> = std::collections::HashMap::new();
-    for r in rows {
-        by_doc.entry(&r.doc_id).or_insert(r.company_code.as_deref());
-    }
-
-    let pairs: Vec<serde_json::Value> = by_doc
-        .into_iter()
-        .map(|(doc_id, company_code)| serde_json::json!({ "doc_id": doc_id, "company_code": company_code }))
+    let updates: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            let id = format!("{}_{}", r.doc_id, r.section);
+            serde_json::json!({ "id": id, "company_code": r.company_code })
+        })
         .collect();
 
-    println!("company_codeのバックフィル対象: {} 書類", pairs.len());
+    println!("company_codeのバックフィル対象: {} 件", updates.len());
 
     let mut done = 0usize;
-    for chunk in pairs.chunks(500) {
+    for chunk in updates.chunks(500) {
         db.query(
-            "FOR $row IN $batch { UPDATE disclosure_text SET company_code = $row.company_code WHERE doc_id = $row.doc_id; }",
+            "FOR $row IN $batch { UPDATE type::thing('disclosure_text', $row.id) SET company_code = $row.company_code; }",
         )
         .bind(("batch", chunk.to_vec()))
         .await?;
         done += chunk.len();
-        print!("\r  company_codeバックフィル: {} / {} 書類", done, pairs.len());
+        print!("\r  company_codeバックフィル: {} / {} 件", done, updates.len());
         std::io::stdout().flush().ok();
     }
     println!();
