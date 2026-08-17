@@ -63,6 +63,9 @@ pub enum Command {
         input: PathBuf,
         #[arg(long, value_name = "DIR", default_value = "data")]
         output: PathBuf,
+        /// EDINETコード→証券コードの対応に使うmaster.parquet
+        #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
+        master: PathBuf,
     },
     /// parseの出力をSurrealDBへ投入する。disclosure_textは未embeddingのものだけ
     /// OpenAIでembeddingしてから投入する（既存分はスキップ、冪等）。

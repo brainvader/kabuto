@@ -22,6 +22,7 @@ DEFINE FIELD OVERWRITE source   ON TABLE macro TYPE string;
 -- 1つのXBRL提出書類（doc_id）から複数レコードが生成される。
 DEFINE TABLE OVERWRITE financial_metric SCHEMAFULL;
 DEFINE FIELD OVERWRITE doc_id       ON TABLE financial_metric TYPE string;
+DEFINE FIELD OVERWRITE company_code ON TABLE financial_metric TYPE option<string>;  -- 証券コード。master.parquetのEDINETコード対応表から解決（2026/08/16/002.md）
 DEFINE FIELD OVERWRITE metric       ON TABLE financial_metric TYPE string;  -- 正規化した指標名
 DEFINE FIELD OVERWRITE xbrl_tag     ON TABLE financial_metric TYPE string;  -- 元のタクソノミ要素名
 DEFINE FIELD OVERWRITE value        ON TABLE financial_metric TYPE float;
@@ -34,6 +35,7 @@ DEFINE FIELD OVERWRITE consolidated ON TABLE financial_metric TYPE bool;
 -- embeddingはOpenAI text-embedding-3-small。対象は自然言語セクションのみ。
 DEFINE TABLE OVERWRITE disclosure_text SCHEMAFULL;
 DEFINE FIELD OVERWRITE doc_id      ON TABLE disclosure_text TYPE string;
+DEFINE FIELD OVERWRITE company_code ON TABLE disclosure_text TYPE option<string>;  -- 証券コード。master.parquetのEDINETコード対応表から解決（2026/08/16/002.md）
 DEFINE FIELD OVERWRITE section     ON TABLE disclosure_text TYPE string;
 DEFINE FIELD OVERWRITE fiscal_year ON TABLE disclosure_text TYPE int;
 DEFINE FIELD OVERWRITE text        ON TABLE disclosure_text TYPE string;

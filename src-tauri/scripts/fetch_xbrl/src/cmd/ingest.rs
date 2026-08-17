@@ -27,6 +27,7 @@ const SCHEMA_SQL: &str = include_str!("../../../../schema.surql");
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct FinancialMetricRow {
     doc_id: String,
+    company_code: Option<String>,
     metric: String,
     xbrl_tag: String,
     value: f64,
@@ -38,6 +39,7 @@ struct FinancialMetricRow {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct DisclosureTextRow {
     doc_id: String,
+    company_code: Option<String>,
     section: String,
     fiscal_year: i32,
     text: String,
@@ -144,6 +146,7 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
                     "id": id,
                     "data": {
                         "doc_id": r.doc_id,
+                        "company_code": r.company_code,
                         "section": r.section,
                         "fiscal_year": r.fiscal_year,
                         "text": r.text,
@@ -159,6 +162,39 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
 
         embedded += chunk.len();
         print!("\r  disclosure_text embedding+投入: {} / {} 件", embedded, to_embed.len());
+        std::io::stdout().flush().ok();
+    }
+    println!();
+
+    backfill_company_code(db, &rows).await?;
+    Ok(())
+}
+
+/// 既にembedding済み（= 上のembed_batchでスキップされた）disclosure_textにも
+/// company_codeを反映する。embeddingの再計算を避けるため、CONTENTでの
+/// 全体上書きではなくフィールド単位のUPDATEにする（2026/08/16/002.md）。
+async fn backfill_company_code(db: &Surreal<Db>, rows: &[DisclosureTextRow]) -> Result<()> {
+    let mut by_doc: std::collections::HashMap<&str, Option<&str>> = std::collections::HashMap::new();
+    for r in rows {
+        by_doc.entry(&r.doc_id).or_insert(r.company_code.as_deref());
+    }
+
+    let pairs: Vec<serde_json::Value> = by_doc
+        .into_iter()
+        .map(|(doc_id, company_code)| serde_json::json!({ "doc_id": doc_id, "company_code": company_code }))
+        .collect();
+
+    println!("company_codeのバックフィル対象: {} 書類", pairs.len());
+
+    let mut done = 0usize;
+    for chunk in pairs.chunks(500) {
+        db.query(
+            "FOR $row IN $batch { UPDATE disclosure_text SET company_code = $row.company_code WHERE doc_id = $row.doc_id; }",
+        )
+        .bind(("batch", chunk.to_vec()))
+        .await?;
+        done += chunk.len();
+        print!("\r  company_codeバックフィル: {} / {} 書類", done, pairs.len());
         std::io::stdout().flush().ok();
     }
     println!();

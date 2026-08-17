@@ -7,12 +7,14 @@
 //! - `*TextBlock`（事業等のリスク等の自然言語セクション）
 
 use anyhow::{Context, Result};
+use polars::prelude::*;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use quick_xml::Reader;
 use regex::Regex;
 use serde::Serialize;
 use std::{
+    collections::HashMap,
     fs,
     io::Write,
     path::{Path, PathBuf},
@@ -59,6 +61,7 @@ const VALID_CONTEXTS: &[(&str, i32)] = &[
 #[derive(Debug, Serialize)]
 struct FinancialMetricRow {
     doc_id: String,
+    company_code: Option<String>,
     metric: String,
     xbrl_tag: String,
     value: f64,
@@ -70,12 +73,13 @@ struct FinancialMetricRow {
 #[derive(Debug, Serialize)]
 struct DisclosureTextRow {
     doc_id: String,
+    company_code: Option<String>,
     section: String,
     fiscal_year: i32,
     text: String,
 }
 
-pub fn run(input_dir: &PathBuf, output_dir: &PathBuf) -> Result<()> {
+pub fn run(input_dir: &PathBuf, output_dir: &PathBuf, master_path: &PathBuf) -> Result<()> {
     fs::create_dir_all(output_dir)?;
     let metrics_path = output_dir.join("financial_metrics.jsonl");
     let texts_path = output_dir.join("disclosure_texts.jsonl");
@@ -83,9 +87,17 @@ pub fn run(input_dir: &PathBuf, output_dir: &PathBuf) -> Result<()> {
     let mut metrics_file = fs::File::create(&metrics_path)?;
     let mut texts_file = fs::File::create(&texts_path)?;
 
+    let edinet_to_code = read_edinet_to_code_map(master_path)?;
+    println!(
+        "EDINETコード→証券コード対応: {} 件（{}）",
+        edinet_to_code.len(),
+        master_path.display()
+    );
+
     let mut doc_count = 0usize;
     let mut metric_count = 0usize;
     let mut text_count = 0usize;
+    let mut unmapped_edinet_codes: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for edinet_entry in fs::read_dir(input_dir)
         .with_context(|| format!("入力ディレクトリを開けません: {}", input_dir.display()))?
@@ -93,6 +105,15 @@ pub fn run(input_dir: &PathBuf, output_dir: &PathBuf) -> Result<()> {
         let edinet_dir = edinet_entry?.path();
         if !edinet_dir.is_dir() {
             continue;
+        }
+        let edinet_code = edinet_dir
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let company_code = edinet_to_code.get(&edinet_code).cloned();
+        if company_code.is_none() {
+            unmapped_edinet_codes.insert(edinet_code.clone());
         }
 
         for doc_entry in fs::read_dir(&edinet_dir)? {
@@ -118,13 +139,14 @@ pub fn run(input_dir: &PathBuf, output_dir: &PathBuf) -> Result<()> {
                 }
             };
 
-            let (metrics, texts) = match parse_xbrl(&xbrl_file, &doc_id, fiscal_year) {
-                Ok(r) => r,
-                Err(e) => {
-                    eprintln!("  × XBRL解析失敗 ({}): {}", doc_id, e);
-                    continue;
-                }
-            };
+            let (metrics, texts) =
+                match parse_xbrl(&xbrl_file, &doc_id, company_code.as_deref(), fiscal_year) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        eprintln!("  × XBRL解析失敗 ({}): {}", doc_id, e);
+                        continue;
+                    }
+                };
 
             for m in &metrics {
                 writeln!(metrics_file, "{}", serde_json::to_string(m)?)?;
@@ -152,10 +174,49 @@ pub fn run(input_dir: &PathBuf, output_dir: &PathBuf) -> Result<()> {
         "完了: {} 書類 / financial_metric {} 件 / disclosure_text {} 件",
         doc_count, metric_count, text_count
     );
+    if !unmapped_edinet_codes.is_empty() {
+        println!(
+            "  ※ master.parquetに対応が無いEDINETコード: {} 件（company_codeはNULLのまま）",
+            unmapped_edinet_codes.len()
+        );
+    }
     println!("出力: {}", metrics_path.display());
     println!("出力: {}", texts_path.display());
 
     Ok(())
+}
+
+/// master.parquetから EDINETコード→証券コード の対応表を作る。
+/// `financial_metric`/`disclosure_text`はdoc_idしか持っておらず銘柄コードを
+/// 直接持っていなかった（2026/08/16/002.md）ため、parse時点で解決して埋め込む。
+fn read_edinet_to_code_map(master_path: &PathBuf) -> Result<HashMap<String, String>> {
+    let file = fs::File::open(master_path)
+        .with_context(|| format!("master.parquetを開けません: {}", master_path.display()))?;
+    let df = ParquetReader::new(file)
+        .finish()
+        .map_err(|e| anyhow::anyhow!("master.parquet読み込み失敗: {}", e))?;
+
+    let edinet_col = df
+        .column("EDINETコード")
+        .map_err(|e| anyhow::anyhow!("EDINETコード列が見つかりません: {}", e))?
+        .str()
+        .map_err(|e| anyhow::anyhow!("EDINETコード列の型が不正です: {}", e))?;
+    let code_col = df
+        .column("証券コード")
+        .map_err(|e| anyhow::anyhow!("証券コード列が見つかりません: {}", e))?
+        .str()
+        .map_err(|e| anyhow::anyhow!("証券コード列の型が不正です: {}", e))?;
+
+    Ok(edinet_col
+        .into_iter()
+        .zip(code_col.into_iter())
+        .filter_map(|(e, c)| match (e, c) {
+            (Some(e), Some(c)) if !e.is_empty() && !c.is_empty() => {
+                Some((e.to_string(), c.to_string()))
+            }
+            _ => None,
+        })
+        .collect())
 }
 
 fn find_xbrl_file(doc_dir: &Path) -> Result<Option<PathBuf>> {
@@ -189,6 +250,7 @@ fn extract_fiscal_year(xbrl_file: &Path) -> Result<i32> {
 fn parse_xbrl(
     path: &Path,
     doc_id: &str,
+    company_code: Option<&str>,
     fiscal_year: i32,
 ) -> Result<(Vec<FinancialMetricRow>, Vec<DisclosureTextRow>)> {
     let content = fs::read(path)?;
@@ -215,6 +277,7 @@ fn parse_xbrl(
                         if let Some((_, offset)) = VALID_CONTEXTS.iter().find(|(c, _)| *c == ctx) {
                             metrics.push(FinancialMetricRow {
                                 doc_id: doc_id.to_string(),
+                                company_code: company_code.map(|c| c.to_string()),
                                 metric: local.to_string(),
                                 xbrl_tag: format!("{}SummaryOfBusinessResults", local),
                                 value,
@@ -238,6 +301,7 @@ fn parse_xbrl(
                     if !clean.trim().is_empty() {
                         texts.push(DisclosureTextRow {
                             doc_id: doc_id.to_string(),
+                            company_code: company_code.map(|c| c.to_string()),
                             section,
                             fiscal_year,
                             text: clean,
