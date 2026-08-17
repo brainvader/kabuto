@@ -64,7 +64,7 @@ fn main() -> Result<()> {
             };
             cmd::fetch::run(&api_key, &filter, from, to, &output, debug)
         }
-        Command::Parse { input, output } => cmd::parse::run(&input, &output),
+        Command::Parse { input, output, master } => cmd::parse::run(&input, &output, &master),
         Command::Ingest { input, db } => cmd::ingest::run(&input, &db),
         Command::Sync {
             codelist_dir,
