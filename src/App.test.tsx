@@ -18,6 +18,10 @@ vi.mock('./components/PlayGround', () => ({
     PlayGround: () => React.createElement('div', { 'data-testid': 'playground' }),
 }))
 
+vi.mock('./components/MetricsPanel', () => ({
+    MetricsPanel: () => React.createElement('div', { 'data-testid': 'metrics-panel-mock' }),
+}))
+
 beforeEach(() => {
     useKabutoStore.setState({ selection: null, pipeline: { status: 'idle', activeId: null } })
     mockOnSelect.mockReset()

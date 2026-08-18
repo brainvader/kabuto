@@ -1,10 +1,12 @@
 import { StockSearch } from '@/components/StockSearch'
 import { PlayGround } from '@/components/PlayGround'
+import { MetricsPanel } from '@/components/MetricsPanel'
 import { useKabutoStore } from '@/store/useKabutoStore'
 
 import './App.css'
 
 function App() {
+  const selection = useKabutoStore((s) => s.selection)
   const setSelection = useKabutoStore((s) => s.setSelection)
 
   return (
@@ -38,7 +40,9 @@ function App() {
       <div
         data-testid="metrics-panel"
         style={{ overflow: 'hidden' }}
-      />
+      >
+        <MetricsPanel selection={selection} />
+      </div>
     </div>
   )
 }
