@@ -1,4 +1,5 @@
 pub mod codelist;
+pub mod companies;
 pub mod fetch;
 pub mod ingest;
 pub mod master;

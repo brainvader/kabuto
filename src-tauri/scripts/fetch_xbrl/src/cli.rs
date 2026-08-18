@@ -76,6 +76,13 @@ pub enum Command {
         #[arg(long, value_name = "FILE", default_value = "../../data/kabuto.db")]
         db: PathBuf,
     },
+    /// master.parquetの銘柄情報をSurrealDBのcompanyテーブルへ投入する（2026/08/18/002.md）。
+    Companies {
+        #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
+        master: PathBuf,
+        #[arg(long, value_name = "FILE", default_value = "../../data/kabuto.db")]
+        db: PathBuf,
+    },
     /// codelist → master → fetch を一括実行し、個別株全件の有価証券報告書を取得する。
     /// 既に取得済みの書類はスキップするため、繰り返し実行しても安全（冪等）。
     Sync {

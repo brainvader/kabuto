@@ -88,7 +88,18 @@ async fn ingest_financial_metrics(db: &Surreal<Db>, input_dir: &PathBuf) -> Resu
             .iter()
             .map(|r| {
                 let id = format!("{}_{}_{}", r.doc_id, r.metric, r.fiscal_year);
-                serde_json::json!({ "id": id, "data": r })
+                serde_json::json!({
+                    "id": id,
+                    "data": {
+                        "doc_id": r.doc_id,
+                        "metric": r.metric,
+                        "xbrl_tag": r.xbrl_tag,
+                        "value": r.value,
+                        "unit": r.unit,
+                        "fiscal_year": r.fiscal_year,
+                        "consolidated": r.consolidated,
+                    }
+                })
             })
             .collect();
 
@@ -101,6 +112,17 @@ async fn ingest_financial_metrics(db: &Surreal<Db>, input_dir: &PathBuf) -> Resu
         std::io::stdout().flush().ok();
     }
     println!();
+
+    link_company(
+        db,
+        "financial_metric",
+        rows.iter().map(|r| {
+            let id = format!("{}_{}_{}", r.doc_id, r.metric, r.fiscal_year);
+            (id, r.company_code.clone())
+        }),
+    )
+    .await?;
+
     Ok(())
 }
 
@@ -146,7 +168,6 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
                     "id": id,
                     "data": {
                         "doc_id": r.doc_id,
-                        "company_code": r.company_code,
                         "section": r.section,
                         "fiscal_year": r.fiscal_year,
                         "text": r.text,
@@ -166,39 +187,48 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
     }
     println!();
 
-    backfill_company_code(db, &rows).await?;
+    link_company(
+        db,
+        "disclosure_text",
+        rows.iter().map(|r| {
+            let id = format!("{}_{}", r.doc_id, r.section);
+            (id, r.company_code.clone())
+        }),
+    )
+    .await?;
+
     Ok(())
 }
 
-/// 既にembedding済み（= 上のembed_batchでスキップされた）disclosure_textにも
-/// company_codeを反映する。embeddingの再計算を避けるため、CONTENTでの
-/// 全体上書きではなくフィールド単位のUPDATEにする（2026/08/16/002.md）。
+/// 指定テーブルの各レコードに company（companyへのレコードリンク）を設定する。
+/// レコードリンクはJSON経由のCONTENTでは作れない（実験で確認済み、2026/08/18/002.md）
+/// ため、`type::thing()`を使うクエリで別途SETする。
 ///
-/// レコードIDは ⟨doc_id⟩_⟨section⟩ で決定的に分かっているため、`WHERE doc_id = ...`
-/// のような検索ベースの更新はしない。doc_id列にインデックスが無い状態でこれを
-/// やった結果、実データ（34,429件）に対して2,372回のフルスキャンが発生し、
-/// 完了しないほど遅くなった実測結果がある（2026/08/17/003.md）。主キー直接指定なら
-/// テーブルサイズに関係なく高速。
-async fn backfill_company_code(db: &Surreal<Db>, rows: &[DisclosureTextRow]) -> Result<()> {
+/// レコードIDは投入時点で決定的に分かっているため、`WHERE doc_id = ...`のような
+/// 検索ベースの更新はしない。doc_idにインデックスが無い状態でそれをやった結果、
+/// 実データに対してフルスキャンが発生し完了しないほど遅くなった実測がある
+/// （2026/08/17/003.md）。主キー直接指定ならテーブルサイズに関係なく高速。
+async fn link_company(
+    db: &Surreal<Db>,
+    table: &str,
+    rows: impl Iterator<Item = (String, Option<String>)>,
+) -> Result<()> {
     let updates: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|r| {
-            let id = format!("{}_{}", r.doc_id, r.section);
-            serde_json::json!({ "id": id, "company_code": r.company_code })
-        })
+        .filter_map(|(id, code)| code.map(|code| serde_json::json!({ "id": id, "code": code })))
         .collect();
 
-    println!("company_codeのバックフィル対象: {} 件", updates.len());
+    println!("{table}: companyリンク設定対象 {} 件", updates.len());
 
     let mut done = 0usize;
     for chunk in updates.chunks(500) {
         db.query(
-            "FOR $row IN $batch { UPDATE type::thing('disclosure_text', $row.id) SET company_code = $row.company_code; }",
+            "FOR $row IN $batch { UPDATE type::thing($table, $row.id) SET company = type::thing('company', $row.code); }",
         )
+        .bind(("table", table.to_string()))
         .bind(("batch", chunk.to_vec()))
         .await?;
         done += chunk.len();
-        print!("\r  company_codeバックフィル: {} / {} 件", done, updates.len());
+        print!("\r  {table} companyリンク: {} / {} 件", done, updates.len());
         std::io::stdout().flush().ok();
     }
     println!();

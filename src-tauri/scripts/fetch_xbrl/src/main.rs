@@ -66,6 +66,7 @@ fn main() -> Result<()> {
         }
         Command::Parse { input, output, master } => cmd::parse::run(&input, &output, &master),
         Command::Ingest { input, db } => cmd::ingest::run(&input, &db),
+        Command::Companies { master, db } => cmd::companies::run(&master, &db),
         Command::Sync {
             codelist_dir,
             jpx,
