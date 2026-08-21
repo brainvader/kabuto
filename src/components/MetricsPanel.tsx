@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 
 import { fetchFinancialMetrics, type FinancialMetricRecord } from '@/lib/financialMetrics'
+import { metricLabel } from '@/lib/metricLabels'
 import type { Selection } from '@/store/useKabutoStore'
 
 export interface MetricsPanelProps {
@@ -94,7 +95,7 @@ export function MetricsPanel({ selection, onFetchMetrics = fetchFinancialMetrics
                             data-testid={`metrics-row-${name}`}
                             className="border-b border-(--kabuto-border)"
                         >
-                            <td className="px-3 py-1.5 text-(--kabuto-fg)">{name}</td>
+                            <td className="px-3 py-1.5 text-(--kabuto-fg)">{metricLabel(name)}</td>
                             {years.map((y) => {
                                 const rec = byMetricYear.get(name)?.get(y)
                                 return (

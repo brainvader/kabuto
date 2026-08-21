@@ -48,8 +48,8 @@ describe('銘柄を検索・選択する', () => {
 
         render(<StockSearch onSelect={vi.fn()} />)
 
-        await userEvent.click(screen.getByRole('button', { name: 'JPX' }))
-        expect(setMarket).toHaveBeenCalledWith('JPX')
+        await userEvent.click(screen.getByRole('button', { name: 'プライム' }))
+        expect(setMarket).toHaveBeenCalledWith('プライム')
     })
 
     it('結果リストに銘柄が表示される', () => {

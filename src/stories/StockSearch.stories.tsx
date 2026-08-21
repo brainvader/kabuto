@@ -35,7 +35,7 @@ export const WithSelection: Story = {
 export const MarketFilter: Story = {
     play: async ({ canvasElement, args }) => {
         const canvas = within(canvasElement)
-        await userEvent.click(canvas.getByRole('button', { name: 'JPX' }))
+        await userEvent.click(canvas.getByRole('button', { name: 'プライム' }))
         await expect(args.onSelect).not.toHaveBeenCalled()
     },
 }
