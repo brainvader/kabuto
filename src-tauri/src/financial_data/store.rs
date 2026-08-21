@@ -10,7 +10,7 @@ pub async fn list_by_company(company_code: &str) -> Result<Vec<FinancialMetricRe
         .await
         .query(
             "SELECT doc_id, company.code AS company_code, metric, xbrl_tag, value, unit, fiscal_year, consolidated \
-             FROM financial_metric WHERE company = type::thing('company', $code) ORDER BY fiscal_year ASC",
+             FROM financial_metric WHERE company = type::record('company', $code) ORDER BY fiscal_year ASC",
         )
         .bind(("code", company_code.to_string()))
         .await?;
@@ -19,16 +19,16 @@ pub async fn list_by_company(company_code: &str) -> Result<Vec<FinancialMetricRe
 
 // ── テスト ────────────────────────────────────────────────────────────────────
 // decision::store と同じ考え方で、本番の data/kabuto.db を汚さない isolated な
-// SurrealKv インスタンスに対してクエリを検証する。
+// RocksDb インスタンスに対してクエリを検証する。
 #[cfg(test)]
 mod tests {
     use super::super::types::FinancialMetricRecord;
-    use surrealdb::engine::local::{Db, SurrealKv};
+    use surrealdb::engine::local::{Db, RocksDb};
     use surrealdb::Surreal;
 
     async fn isolated_db(path: &str) -> Surreal<Db> {
         let _ = std::fs::remove_dir_all(path);
-        let db = Surreal::new::<SurrealKv>(path).await.expect("SurrealDB 初期化失敗");
+        let db = Surreal::new::<RocksDb>(path).await.expect("SurrealDB 初期化失敗");
         db.use_ns("kabuto_test")
             .use_db("kabuto_test")
             .await
@@ -60,7 +60,7 @@ mod tests {
             ("docB_Revenue_2025", "docB", "7203", 500.0, 2025),
         ] {
             db.query(
-                "UPSERT type::thing('financial_metric', $id) CONTENT \
+                "UPSERT type::record('financial_metric', $id) CONTENT \
                  { doc_id: $doc_id, metric: 'Revenue', xbrl_tag: 'RevenueSummaryOfBusinessResults', value: $value, unit: 'JPY', fiscal_year: $fiscal_year, consolidated: true }",
             )
             .bind(("id", id))
@@ -71,7 +71,7 @@ mod tests {
             .expect("upsert失敗")
             .check()
             .expect("upsertにクエリエラー");
-            db.query("UPDATE type::thing('financial_metric', $id) SET company = type::thing('company', $code)")
+            db.query("UPDATE type::record('financial_metric', $id) SET company = type::record('company', $code)")
                 .bind(("id", id))
                 .bind(("code", code))
                 .await
@@ -83,7 +83,7 @@ mod tests {
         let mut resp = db
             .query(
                 "SELECT doc_id, company.code AS company_code, metric, xbrl_tag, value, unit, fiscal_year, consolidated \
-                 FROM financial_metric WHERE company = type::thing('company', $code) ORDER BY fiscal_year ASC",
+                 FROM financial_metric WHERE company = type::record('company', $code) ORDER BY fiscal_year ASC",
             )
             .bind(("code", "1605".to_string()))
             .await

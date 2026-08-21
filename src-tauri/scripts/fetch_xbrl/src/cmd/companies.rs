@@ -1,11 +1,11 @@
 //! master.parquetの銘柄情報をSurrealDBのcompanyテーブルへ投入する（2026/08/18/002.md）。
-//! APIは呼ばない。証券コードを主キー（type::thing('company', code)）としてUPSERTする。
+//! APIは呼ばない。証券コードを主キー（type::record('company', code)）としてUPSERTする。
 //! スキーマは適用しない（`init-db`サブコマンドで先に適用しておくこと、2026/08/21/002.md）。
 
 use anyhow::{Context, Result};
 use polars::prelude::*;
 use std::{fs, io::Write, path::PathBuf};
-use surrealdb::engine::local::SurrealKv;
+use surrealdb::engine::local::RocksDb;
 use surrealdb::Surreal;
 
 struct CompanyRow {
@@ -25,7 +25,7 @@ async fn run_async(master_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
     let db_path_str = db_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("DBパスが不正です: {}", db_path.display()))?;
-    let db = Surreal::new::<SurrealKv>(db_path_str)
+    let db = Surreal::new::<RocksDb>(db_path_str)
         .await
         .with_context(|| format!("SurrealDB初期化失敗: {}", db_path.display()))?;
     db.use_ns("kabuto").use_db("kabuto").await?;
@@ -38,14 +38,14 @@ async fn run_async(master_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
         let batch: Vec<serde_json::Value> = chunk
             .iter()
             .map(|r| {
-                serde_json::json!({
+                strip_nulls(serde_json::json!({
                     "id": r.code,
                     "code": r.code,
                     "name": r.name,
                     "sector": r.sector,
                     "market": r.market,
                     "edinet_code": r.edinet_code,
-                })
+                }))
             })
             .collect();
 
@@ -54,7 +54,7 @@ async fn run_async(master_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
         // スキーマ違反になることがある（2026/08/21/001.mdで実際に発生）。
         db.query(
             "FOR $row IN $batch { \
-               UPSERT type::thing('company', $row.id) SET \
+               UPSERT type::record('company', $row.id) SET \
                  code = $row.code, name = $row.name, sector = $row.sector, \
                  market = $row.market, edinet_code = $row.edinet_code; \
              }",
@@ -69,6 +69,17 @@ async fn run_async(master_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
     }
     println!();
     Ok(())
+}
+
+/// SurrealDB 3.xはNULL（明示的な空値）とNONE（未設定）を区別し、
+/// `option<T>`型フィールドへのNULL代入をエラーにする。serde_jsonは
+/// Option::Noneを`null`にするため、バインド前にnullキーを取り除いて
+/// 未設定（NONE相当）にする。
+fn strip_nulls(mut v: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(map) = &mut v {
+        map.retain(|_, val| !val.is_null());
+    }
+    v
 }
 
 fn read_companies(master_path: &PathBuf) -> Result<Vec<CompanyRow>> {

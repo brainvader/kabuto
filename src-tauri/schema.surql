@@ -4,7 +4,7 @@
 -- DEFINE ... OVERWRITE により、再適用しても壊れない（冪等）。
 
 -- company ノード（2026/08/18/002.md）
--- 証券コードを主キーとする（type::thing('company', code)）。
+-- 証券コードを主キーとする（type::record('company', code)）。
 -- 様々なデータ（financial_metric/disclosure_text等）が統合される中心ノード。
 DEFINE TABLE OVERWRITE company SCHEMAFULL;
 DEFINE FIELD OVERWRITE code        ON TABLE company TYPE string;

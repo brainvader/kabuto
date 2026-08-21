@@ -2,10 +2,11 @@
 //! フィールド構成は schema.surql と対応させている。
 
 use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
 
 /// 1つの仮説検証の結果。based_on_doc_ids で financial_metric/disclosure_text の
 /// 元データまで遡れる。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 pub struct Decision {
     pub hypothesis: String,
     pub method: String,
@@ -20,7 +21,7 @@ pub struct Decision {
 /// selection_mode: "exclusive"（排他的候補から1つ採用） | "composite"（複数要因を統合）
 /// action_taken:   "bought" | "sold" | "watched" | "none"
 ///   Palantir流の承認ゲートではなく、事後に振り返るための事実の記録（08/15/004.md）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 pub struct DecisionSession {
     pub question: String,
     /// company レコードへの参照（例: "company:1605"）
@@ -49,7 +50,7 @@ fn default_action_taken() -> String {
 /// list_decision_sessions の1行分。DecisionSession に record id を加えたもの
 /// （一覧からセッションを選ぶUIにはidが必須だが、CONTENT書き込みに使う
 /// DecisionSession自体にはSCHEMAFULL上idフィールドが無いため分けている）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 pub struct DecisionSessionSummary {
     pub id: String,
     pub question: String,
@@ -62,7 +63,7 @@ pub struct DecisionSessionSummary {
 
 /// decision_session の CONSIDERED エッジ1本分。target は "decision:xxx" | "decision_session:xxx"
 /// 形式のレコード参照文字列（呼び出し側が ':' で table/id に分解する）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 pub struct ConsideredEdge {
     pub target: String,
     pub selected: bool,
@@ -70,7 +71,7 @@ pub struct ConsideredEdge {
 }
 
 /// 「なぜこの仮説を思いついたか」という思考の切っ掛け（08/15/003.md）。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 pub struct Trigger {
     #[serde(rename = "type")]
     pub kind: String, // human_note | news | disclosure_text_match | precedent_recall

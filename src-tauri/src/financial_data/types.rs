@@ -2,9 +2,10 @@
 //! フィールド構成は schema.surql と対応させている。
 
 use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
 
 /// XBRLの5期比較サマリーから抽出した財務指標1件。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 pub struct FinancialMetricRecord {
     pub doc_id: String,
     /// 証券コード。master.parquetのEDINETコード対応表から解決（未対応の書類はNone）。

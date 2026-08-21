@@ -9,7 +9,7 @@ use decision::commands::{
     relate_considered_cmd, relate_prompted_cmd, resolve_decision_session_cmd,
 };
 use financial_data::commands::list_financial_metrics_cmd;
-use surrealdb::engine::local::{Db, SurrealKv};
+use surrealdb::engine::local::{Db, RocksDb};
 use surrealdb::Surreal;
 use tokio::sync::OnceCell;
 
@@ -23,7 +23,7 @@ use tokio::sync::OnceCell;
 pub(crate) async fn db() -> &'static Surreal<Db> {
     static DB: OnceCell<Surreal<Db>> = OnceCell::const_new();
     DB.get_or_init(|| async {
-        let db = Surreal::new::<SurrealKv>("data/kabuto.db")
+        let db = Surreal::new::<RocksDb>("data/kabuto.db")
             .await
             .expect("SurrealDB 初期化失敗");
         db.use_ns("kabuto")
@@ -57,7 +57,7 @@ mod tests {
     /// 本番用の data/kabuto.db とは別のDBファイルを使い、状態を汚さない。
     #[tokio::test]
     async fn schema_sql_applies_without_error() {
-        let test_db = Surreal::new::<SurrealKv>("data/test_schema.db")
+        let test_db = Surreal::new::<RocksDb>("data/test_schema.db")
             .await
             .expect("SurrealDB 初期化失敗");
         test_db

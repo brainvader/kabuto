@@ -8,7 +8,7 @@
 //! embeddingを含むレコード全体が2回書き込まれてDBが肥大化する
 //! （2026/08/21/001.mdで実測・原因究明済み）。
 //!
-//! アプリ本体（src-tauri）と同じ埋め込みSurrealKvエンジンを使うため、
+//! アプリ本体（src-tauri）と同じ埋め込みRocksDbエンジンを使うため、
 //! アプリを起動したまま実行しないこと（同じDBファイルを同時に開けない）。
 
 use anyhow::{Context, Result};
@@ -19,7 +19,8 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::PathBuf,
 };
-use surrealdb::engine::local::{Db, SurrealKv};
+use surrealdb::engine::local::{Db, RocksDb};
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 
 const EMBEDDING_MODEL: &str = "text-embedding-3-small";
@@ -48,7 +49,7 @@ struct DisclosureTextRow {
     text: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, SurrealValue)]
 struct ExistingKey {
     doc_id: String,
     section: String,
@@ -66,7 +67,7 @@ async fn run_async(input_dir: &PathBuf, db_path: &PathBuf, api_key: &str) -> Res
     let db_path_str = db_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("DBパスが不正です: {}", db_path.display()))?;
-    let db = Surreal::new::<SurrealKv>(db_path_str)
+    let db = Surreal::new::<RocksDb>(db_path_str)
         .await
         .with_context(|| format!("SurrealDB初期化失敗: {}", db_path.display()))?;
     db.use_ns("kabuto").use_db("kabuto").await?;
@@ -88,7 +89,7 @@ async fn ingest_financial_metrics(db: &Surreal<Db>, input_dir: &PathBuf) -> Resu
             .iter()
             .map(|r| {
                 let id = format!("{}_{}_{}", r.doc_id, r.metric, r.fiscal_year);
-                serde_json::json!({
+                strip_nulls(serde_json::json!({
                     "id": id,
                     "doc_id": r.doc_id,
                     "metric": r.metric,
@@ -98,18 +99,18 @@ async fn ingest_financial_metrics(db: &Surreal<Db>, input_dir: &PathBuf) -> Resu
                     "fiscal_year": r.fiscal_year,
                     "consolidated": r.consolidated,
                     "company_code": r.company_code,
-                })
+                }))
             })
             .collect();
 
         db.query(
             "FOR $row IN $batch { \
-               UPSERT type::thing('financial_metric', $row.id) SET \
+               UPSERT type::record('financial_metric', $row.id) SET \
                  doc_id = $row.doc_id, metric = $row.metric, xbrl_tag = $row.xbrl_tag, \
                  value = $row.value, unit = $row.unit, \
                  fiscal_year = $row.fiscal_year, consolidated = $row.consolidated, \
                  company = IF $row.company_code != NONE \
-                            THEN type::thing('company', $row.company_code) \
+                            THEN type::record('company', $row.company_code) \
                             ELSE NONE END; \
              }",
         )
@@ -163,7 +164,7 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
             .zip(embeddings.iter())
             .map(|(r, emb)| {
                 let id = format!("{}_{}", r.doc_id, r.section);
-                serde_json::json!({
+                strip_nulls(serde_json::json!({
                     "id": id,
                     "doc_id": r.doc_id,
                     "section": r.section,
@@ -171,17 +172,17 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
                     "text": r.text,
                     "embedding": emb,
                     "company_code": r.company_code,
-                })
+                }))
             })
             .collect();
 
         db.query(
             "FOR $row IN $batch { \
-               UPSERT type::thing('disclosure_text', $row.id) SET \
+               UPSERT type::record('disclosure_text', $row.id) SET \
                  doc_id = $row.doc_id, section = $row.section, fiscal_year = $row.fiscal_year, \
                  text = $row.text, embedding = $row.embedding, \
                  company = IF $row.company_code != NONE \
-                            THEN type::thing('company', $row.company_code) \
+                            THEN type::record('company', $row.company_code) \
                             ELSE NONE END; \
              }",
         )
@@ -195,6 +196,17 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
     }
     println!();
     Ok(())
+}
+
+/// SurrealDB 3.xはNULL（明示的な空値）とNONE（未設定）を区別し、
+/// `option<T>`型フィールドへのNULL代入をエラーにする。serde_jsonは
+/// Option::Noneを`null`にするため、バインド前にnullキーを取り除いて
+/// 未設定（NONE相当）にする。
+fn strip_nulls(mut v: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(map) = &mut v {
+        map.retain(|_, val| !val.is_null());
+    }
+    v
 }
 
 fn read_jsonl<T: for<'de> Deserialize<'de>>(path: &PathBuf) -> Result<Vec<T>> {

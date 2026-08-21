@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
-use surrealdb::engine::local::SurrealKv;
+use surrealdb::engine::local::RocksDb;
 use surrealdb::Surreal;
 
 // アプリ本体（src-tauri）と同じスキーマファイルを共有する。
@@ -22,7 +22,7 @@ async fn run_async(db_path: &PathBuf) -> Result<()> {
     let db_path_str = db_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("DBパスが不正です: {}", db_path.display()))?;
-    let db = Surreal::new::<SurrealKv>(db_path_str)
+    let db = Surreal::new::<RocksDb>(db_path_str)
         .await
         .with_context(|| format!("SurrealDB初期化失敗: {}", db_path.display()))?;
     db.use_ns("kabuto").use_db("kabuto").await?;

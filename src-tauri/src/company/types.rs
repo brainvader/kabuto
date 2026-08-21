@@ -1,6 +1,7 @@
 //! company の型定義（2026/08/18/002.md）。
 
 use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
 
 /// 銘柄検索の結果1件。フロントエンドの `StockItem`（旧 search_stocks、
 /// master.parquet直読み時代）と互換の形にして、呼び出し側の変更を避ける。
@@ -13,7 +14,7 @@ pub struct CompanyItem {
 }
 
 /// SurrealDBの`company`テーブルから読み取る生の行（market/sectorはoption）。
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, SurrealValue)]
 pub(crate) struct CompanyRow {
     pub code: String,
     pub name: String,

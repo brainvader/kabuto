@@ -41,12 +41,12 @@ pub async fn search_by_name(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use surrealdb::engine::local::{Db, SurrealKv};
+    use surrealdb::engine::local::{Db, RocksDb};
     use surrealdb::Surreal;
 
     async fn isolated_db(path: &str) -> Surreal<Db> {
         let _ = std::fs::remove_dir_all(path);
-        let db = Surreal::new::<SurrealKv>(path).await.expect("SurrealDB 初期化失敗");
+        let db = Surreal::new::<RocksDb>(path).await.expect("SurrealDB 初期化失敗");
         db.use_ns("kabuto_test")
             .use_db("kabuto_test")
             .await

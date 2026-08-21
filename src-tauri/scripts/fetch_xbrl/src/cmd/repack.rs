@@ -1,5 +1,5 @@
 //! 肥大化した`data/kabuto.db`を、新しい空のDBへバッチコピーして詰め直す（2026/08/18/003.md）。
-//! SurrealKvのvalue logに積み上がった古いバージョンを持ち込まないため、
+//! RocksDbのvalue logに積み上がった古いバージョンを持ち込まないため、
 //! `export`/`import`は使わず、テーブルごとに読み出し→書き込みを行う。
 //! embeddingは再計算せずそのまま複製する（OpenAI API呼び出しなし）。
 //!
@@ -14,7 +14,8 @@
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::{io::Write, path::PathBuf};
-use surrealdb::engine::local::{Db, SurrealKv};
+use surrealdb::engine::local::{Db, RocksDb};
+use surrealdb::types::SurrealValue;
 use surrealdb::Surreal;
 
 const BATCH_SIZE: usize = 500;
@@ -32,12 +33,12 @@ async fn run_async(src: &PathBuf, dst: &PathBuf, limit: Option<usize>) -> Result
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("dstパスが不正です: {}", dst.display()))?;
 
-    let src_db = Surreal::new::<SurrealKv>(src_str)
+    let src_db = Surreal::new::<RocksDb>(src_str)
         .await
         .with_context(|| format!("コピー元DB初期化失敗: {}", src.display()))?;
     src_db.use_ns("kabuto").use_db("kabuto").await?;
 
-    let dst_db = Surreal::new::<SurrealKv>(dst_str)
+    let dst_db = Surreal::new::<RocksDb>(dst_str)
         .await
         .with_context(|| format!("コピー先DB初期化失敗: {}", dst.display()))?;
     dst_db.use_ns("kabuto").use_db("kabuto").await?;
@@ -54,10 +55,21 @@ async fn run_async(src: &PathBuf, dst: &PathBuf, limit: Option<usize>) -> Result
     Ok(())
 }
 
+/// SurrealDB 3.xはNULL（明示的な空値）とNONE（未設定）を区別し、
+/// `option<T>`型フィールドへのNULL代入をエラーにする。serde_jsonは
+/// Option::Noneを`null`にするため、バインド前にnullキーを取り除いて
+/// 未設定（NONE相当）にする。
+fn strip_nulls(mut v: serde_json::Value) -> serde_json::Value {
+    if let serde_json::Value::Object(map) = &mut v {
+        map.retain(|_, val| !val.is_null());
+    }
+    v
+}
+
 /// `count()`だけの軽いクエリで件数を取る。src/dstが既に同じ件数なら、
 /// そのテーブルの全件読み込みそのものをスキップするために使う。
 async fn count_of(db: &Surreal<Db>, table: &str) -> Result<i64> {
-    #[derive(Deserialize)]
+    #[derive(Deserialize, SurrealValue)]
     struct CountRow {
         count: i64,
     }
@@ -71,7 +83,7 @@ async fn existing_ids(dst: &Surreal<Db>, table: &str) -> Result<std::collections
         .query(format!("SELECT <string>id AS id FROM {table}"))
         .await?
         .check()?;
-    #[derive(Deserialize)]
+    #[derive(Deserialize, SurrealValue)]
     struct IdRow {
         id: String,
     }
@@ -90,7 +102,7 @@ async fn existing_ids(dst: &Surreal<Db>, table: &str) -> Result<std::collections
         .collect())
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, SurrealValue)]
 struct CompanyRow {
     code: String,
     name: String,
@@ -121,16 +133,16 @@ async fn copy_company(src: &Surreal<Db>, dst: &Surreal<Db>, limit: Option<usize>
         let batch: Vec<serde_json::Value> = chunk
             .iter()
             .map(|r| {
-                serde_json::json!({
+                strip_nulls(serde_json::json!({
                     "id": r.code,
                     "code": r.code, "name": r.name,
                     "sector": r.sector, "market": r.market, "edinet_code": r.edinet_code,
-                })
+                }))
             })
             .collect();
         dst.query(
             "FOR $row IN $batch { \
-               UPSERT type::thing('company', $row.id) SET \
+               UPSERT type::record('company', $row.id) SET \
                  code = $row.code, name = $row.name, sector = $row.sector, \
                  market = $row.market, edinet_code = $row.edinet_code; \
              }",
@@ -148,7 +160,7 @@ async fn copy_company(src: &Surreal<Db>, dst: &Surreal<Db>, limit: Option<usize>
     Ok(limit.map(|n| n.saturating_sub(todo.len())))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, SurrealValue)]
 struct FinancialMetricRow {
     doc_id: String,
     company_code: Option<String>,
@@ -192,23 +204,23 @@ async fn copy_financial_metric(src: &Surreal<Db>, dst: &Surreal<Db>, limit: Opti
             .iter()
             .map(|r| {
                 let id = format!("{}_{}_{}", r.doc_id, r.metric, r.fiscal_year);
-                serde_json::json!({
+                strip_nulls(serde_json::json!({
                     "id": id,
                     "doc_id": r.doc_id, "metric": r.metric, "xbrl_tag": r.xbrl_tag,
                     "value": r.value, "unit": r.unit,
                     "fiscal_year": r.fiscal_year, "consolidated": r.consolidated,
                     "company_code": r.company_code,
-                })
+                }))
             })
             .collect();
         dst.query(
             "FOR $row IN $batch { \
-               UPSERT type::thing('financial_metric', $row.id) SET \
+               UPSERT type::record('financial_metric', $row.id) SET \
                  doc_id = $row.doc_id, metric = $row.metric, xbrl_tag = $row.xbrl_tag, \
                  value = $row.value, unit = $row.unit, \
                  fiscal_year = $row.fiscal_year, consolidated = $row.consolidated, \
                  company = IF $row.company_code != NONE \
-                            THEN type::thing('company', $row.company_code) \
+                            THEN type::record('company', $row.company_code) \
                             ELSE NONE END; \
              }",
         )
@@ -226,13 +238,13 @@ async fn copy_financial_metric(src: &Surreal<Db>, dst: &Surreal<Db>, limit: Opti
     Ok(limit.map(|n| n.saturating_sub(todo.len())))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, SurrealValue)]
 struct DisclosureKey {
     doc_id: String,
     section: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, SurrealValue)]
 struct DisclosureTextRow {
     doc_id: String,
     company_code: Option<String>,
@@ -296,21 +308,21 @@ async fn copy_disclosure_text(src: &Surreal<Db>, dst: &Surreal<Db>, limit: Optio
             .iter()
             .map(|r| {
                 let id = format!("{}_{}", r.doc_id, r.section);
-                serde_json::json!({
+                strip_nulls(serde_json::json!({
                     "id": id,
                     "doc_id": r.doc_id, "section": r.section, "fiscal_year": r.fiscal_year,
                     "text": r.text, "embedding": r.embedding,
                     "company_code": r.company_code,
-                })
+                }))
             })
             .collect();
         dst.query(
             "FOR $row IN $batch { \
-               UPSERT type::thing('disclosure_text', $row.id) SET \
+               UPSERT type::record('disclosure_text', $row.id) SET \
                  doc_id = $row.doc_id, section = $row.section, fiscal_year = $row.fiscal_year, \
                  text = $row.text, embedding = $row.embedding, \
                  company = IF $row.company_code != NONE \
-                            THEN type::thing('company', $row.company_code) \
+                            THEN type::record('company', $row.company_code) \
                             ELSE NONE END; \
              }",
         )
@@ -336,7 +348,7 @@ mod tests {
 
     async fn isolated_db(path: &str) -> Surreal<Db> {
         let _ = std::fs::remove_dir_all(path);
-        let db = Surreal::new::<SurrealKv>(path).await.expect("SurrealDB 初期化失敗");
+        let db = Surreal::new::<RocksDb>(path).await.expect("SurrealDB 初期化失敗");
         db.use_ns("kabuto_test").use_db("kabuto_test").await.expect("NS/DB 選択失敗");
         db.query(SCHEMA_SQL).await.expect("スキーマ適用失敗").check().expect("スキーマにクエリエラー");
         db
@@ -381,7 +393,7 @@ mod tests {
             .expect("クエリ失敗")
             .check()
             .expect("クエリエラー");
-        #[derive(serde::Deserialize, Debug)]
+        #[derive(serde::Deserialize, Debug, SurrealValue)]
         struct Row {
             doc_id: String,
         }
@@ -401,13 +413,13 @@ mod tests {
         src.query("CREATE company:⟨1301⟩ SET code = '1301', name = 'テスト水産'")
             .await.expect("作成失敗").check().expect("作成エラー");
         src.query(
-            "UPSERT type::thing('financial_metric', 'docA_Revenue_2025') SET \
+            "UPSERT type::record('financial_metric', 'docA_Revenue_2025') SET \
                doc_id = 'docA', metric = 'Revenue', xbrl_tag = 'x', value = 100.0, unit = 'JPY', \
                fiscal_year = 2025, consolidated = true, company = company:⟨1301⟩;",
         )
         .await.expect("作成失敗").check().expect("作成エラー");
         src.query(
-            "UPSERT type::thing('disclosure_text', 'docA_BusinessRisks') SET \
+            "UPSERT type::record('disclosure_text', 'docA_BusinessRisks') SET \
                doc_id = 'docA', section = 'BusinessRisks', fiscal_year = 2025, text = 'リスクです', \
                embedding = [0.1, 0.2], company = company:⟨1301⟩;",
         )
@@ -417,7 +429,7 @@ mod tests {
         copy_financial_metric(&src, &dst, None).await.expect("financial_metric失敗");
         copy_disclosure_text(&src, &dst, None).await.expect("disclosure_text失敗");
 
-        #[derive(Deserialize, Debug)]
+        #[derive(Deserialize, Debug, SurrealValue)]
         struct FmRow { value: f64, company_name: Option<String> }
         let mut resp = dst
             .query("SELECT `value` AS value, company.name AS company_name FROM financial_metric:⟨docA_Revenue_2025⟩")
@@ -427,7 +439,7 @@ mod tests {
         assert_eq!(fm[0].value, 100.0);
         assert_eq!(fm[0].company_name.as_deref(), Some("テスト水産"));
 
-        #[derive(Deserialize, Debug)]
+        #[derive(Deserialize, Debug, SurrealValue)]
         struct DtRow { text: String, embedding: Vec<f64>, company_name: Option<String> }
         let mut resp2 = dst
             .query("SELECT text, embedding, company.name AS company_name FROM disclosure_text:⟨docA_BusinessRisks⟩")
