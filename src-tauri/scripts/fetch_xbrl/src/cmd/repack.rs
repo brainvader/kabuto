@@ -450,4 +450,102 @@ mod tests {
         assert_eq!(dt[0].embedding, vec![0.1, 0.2]);
         assert_eq!(dt[0].company_name.as_deref(), Some("テスト水産"));
     }
+
+    /// RocksDBはDrop時にLOCKファイルの解放が非同期クリーンアップに乗るため、
+    /// drop直後の再オープンがまれに競合する。少し待って数回リトライする。
+    async fn reopen_with_retry(path: &str) -> Surreal<Db> {
+        let mut last_err = None;
+        for attempt in 0..10 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            match Surreal::new::<RocksDb>(path).await {
+                Ok(db) => return db,
+                Err(e) => {
+                    println!("再オープン試行{attempt}失敗: {e:?}");
+                    last_err = Some(e);
+                }
+            }
+        }
+        panic!("再オープンに10回失敗: {:?}", last_err);
+    }
+
+    fn dir_size(path: &str) -> u64 {
+        let mut total = 0u64;
+        let Ok(entries) = std::fs::read_dir(path) else { return 0 };
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                total += dir_size(p.to_str().unwrap());
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+        total
+    }
+
+    /// 移行計画（2026/08/21/001.md）Step 3-4の実測：ingest/repackと同じ
+    /// バッチUPSERT・繰り返し上書きパターンで、RocksDBバックエンドが
+    /// ALTER DATABASE COMPACTで実際にサイズを縮められるかを確認する。
+    /// 通常のテスト実行では走らせない（時間がかかる実測用）。
+    #[tokio::test]
+    #[ignore]
+    async fn alter_database_compact_reclaims_space_on_rocksdb() {
+        let path = "data/test_compact_scratch.db";
+        let db = isolated_db(path).await;
+
+        // financial_metricを1,000件作り、同じIDを10回上書きする
+        // （ingest/repackの再実行で同じレコードが繰り返し更新される状況を再現）。
+        for round in 0..10 {
+            let batch: Vec<serde_json::Value> = (0..1000)
+                .map(|i| {
+                    serde_json::json!({
+                        "id": format!("doc{i}_Revenue_2025"),
+                        "doc_id": format!("doc{i}"),
+                        "metric": "Revenue",
+                        "xbrl_tag": "x",
+                        "value": (round * 1000 + i) as f64,
+                        "unit": "JPY",
+                        "fiscal_year": 2025,
+                        "consolidated": true,
+                    })
+                })
+                .collect();
+            db.query(
+                "FOR $row IN $batch { \
+                   UPSERT type::record('financial_metric', $row.id) SET \
+                     doc_id = $row.doc_id, metric = $row.metric, xbrl_tag = $row.xbrl_tag, \
+                     value = $row.value, unit = $row.unit, \
+                     fiscal_year = $row.fiscal_year, consolidated = $row.consolidated; \
+                 }",
+            )
+            .bind(("batch", batch))
+            .await
+            .expect("クエリ失敗")
+            .check()
+            .expect("クエリエラー");
+        }
+        drop(db);
+
+        // 再オープン+軽いクエリでフラッシュしてから計測（ディスク書き出し前に
+        // 測ってしまうバグの再発防止、2026/08/21/001.mdで既知の失敗パターン）。
+        let db = reopen_with_retry(path).await;
+        db.use_ns("kabuto_test").use_db("kabuto_test").await.expect("NS/DB選択失敗");
+        db.query("SELECT count() FROM financial_metric GROUP ALL").await.expect("flush用クエリ失敗");
+        let before = dir_size(path);
+        println!("compact前: {} bytes ({:.2} MB)", before, before as f64 / 1_048_576.0);
+
+        let compact_result = db.query("ALTER DATABASE COMPACT").await;
+        match &compact_result {
+            Ok(resp) => println!("ALTER DATABASE COMPACT 結果: {:?}", resp),
+            Err(e) => println!("ALTER DATABASE COMPACT エラー: {:?}", e),
+        }
+        compact_result.expect("COMPACTクエリ失敗").check().expect("COMPACTにクエリエラー");
+        drop(db);
+
+        let db = reopen_with_retry(path).await;
+        db.use_ns("kabuto_test").use_db("kabuto_test").await.expect("NS/DB選択失敗2");
+        db.query("SELECT count() FROM financial_metric GROUP ALL").await.expect("flush用クエリ失敗2");
+        let after = dir_size(path);
+        println!("compact後: {} bytes ({:.2} MB)", after, after as f64 / 1_048_576.0);
+        println!("削減: {} bytes ({:.1}%)", before.saturating_sub(after), 100.0 * (1.0 - after as f64 / before as f64));
+    }
 }
