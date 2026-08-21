@@ -65,8 +65,10 @@ fn main() -> Result<()> {
             cmd::fetch::run(&api_key, &filter, from, to, &output, debug)
         }
         Command::Parse { input, output, master } => cmd::parse::run(&input, &output, &master),
+        Command::InitDb { db } => cmd::init_db::run(&db),
         Command::Ingest { input, db } => cmd::ingest::run(&input, &db),
         Command::Companies { master, db } => cmd::companies::run(&master, &db),
+        Command::Repack { src, dst, limit } => cmd::repack::run(&src, &dst, limit),
         Command::Sync {
             codelist_dir,
             jpx,

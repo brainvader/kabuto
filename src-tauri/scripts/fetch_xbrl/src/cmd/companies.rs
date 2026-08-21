@@ -1,14 +1,12 @@
 //! master.parquetの銘柄情報をSurrealDBのcompanyテーブルへ投入する（2026/08/18/002.md）。
 //! APIは呼ばない。証券コードを主キー（type::thing('company', code)）としてUPSERTする。
+//! スキーマは適用しない（`init-db`サブコマンドで先に適用しておくこと、2026/08/21/002.md）。
 
 use anyhow::{Context, Result};
 use polars::prelude::*;
 use std::{fs, io::Write, path::PathBuf};
 use surrealdb::engine::local::SurrealKv;
 use surrealdb::Surreal;
-
-// アプリ本体（src-tauri）と同じスキーマファイルを共有する。
-const SCHEMA_SQL: &str = include_str!("../../../../schema.surql");
 
 struct CompanyRow {
     code: String,
@@ -32,9 +30,6 @@ async fn run_async(master_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
         .with_context(|| format!("SurrealDB初期化失敗: {}", db_path.display()))?;
     db.use_ns("kabuto").use_db("kabuto").await?;
 
-    println!("スキーマを適用中...");
-    db.query(SCHEMA_SQL).await?;
-
     let rows = read_companies(master_path)?;
     println!("company: {} 件を読み込み（{}）", rows.len(), master_path.display());
 
@@ -45,20 +40,28 @@ async fn run_async(master_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
             .map(|r| {
                 serde_json::json!({
                     "id": r.code,
-                    "data": {
-                        "code": r.code,
-                        "name": r.name,
-                        "sector": r.sector,
-                        "market": r.market,
-                        "edinet_code": r.edinet_code,
-                    }
+                    "code": r.code,
+                    "name": r.name,
+                    "sector": r.sector,
+                    "market": r.market,
+                    "edinet_code": r.edinet_code,
                 })
             })
             .collect();
 
-        db.query("FOR $row IN $batch { UPSERT type::thing('company', $row.id) CONTENT $row.data; }")
+        // CONTENTではなくSETを使う。CONTENTは既存レコードへのUPSERT時、
+        // 渡さなかったフィールド（updated_at等のDEFAULT付き）を空にしてしまい
+        // スキーマ違反になることがある（2026/08/21/001.mdで実際に発生）。
+        db.query(
+            "FOR $row IN $batch { \
+               UPSERT type::thing('company', $row.id) SET \
+                 code = $row.code, name = $row.name, sector = $row.sector, \
+                 market = $row.market, edinet_code = $row.edinet_code; \
+             }",
+        )
             .bind(("batch", batch))
-            .await?;
+            .await?
+            .check()?;
 
         count += chunk.len();
         print!("\r  company 投入: {} / {} 件", count, rows.len());

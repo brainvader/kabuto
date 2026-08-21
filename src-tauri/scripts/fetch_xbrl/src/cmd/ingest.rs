@@ -2,6 +2,12 @@
 //! SurrealDBへ投入する。disclosure_textは未embeddingのものだけOpenAIで
 //! embeddingしてから投入する（2026/08/15/007.md Step 3）。
 //!
+//! スキーマは適用しない（`init-db`サブコマンドで先に適用しておくこと）。
+//! 各レコードは1回のUPSERT ... SETで、companyへのレコードリンクも含めて
+//! 書き切る。CONTENT + 別クエリでのUPDATEという2段階に分けると、
+//! embeddingを含むレコード全体が2回書き込まれてDBが肥大化する
+//! （2026/08/21/001.mdで実測・原因究明済み）。
+//!
 //! アプリ本体（src-tauri）と同じ埋め込みSurrealKvエンジンを使うため、
 //! アプリを起動したまま実行しないこと（同じDBファイルを同時に開けない）。
 
@@ -20,9 +26,6 @@ const EMBEDDING_MODEL: &str = "text-embedding-3-small";
 const EMBEDDING_BATCH_SIZE: usize = 50;
 /// 1件あたりの文字数上限。8,191トークンの入力上限に対する安全マージン。
 const MAX_TEXT_CHARS: usize = 6000;
-
-// アプリ本体（src-tauri）と同じスキーマファイルを共有する。
-const SCHEMA_SQL: &str = include_str!("../../../../schema.surql");
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 struct FinancialMetricRow {
@@ -68,9 +71,6 @@ async fn run_async(input_dir: &PathBuf, db_path: &PathBuf, api_key: &str) -> Res
         .with_context(|| format!("SurrealDB初期化失敗: {}", db_path.display()))?;
     db.use_ns("kabuto").use_db("kabuto").await?;
 
-    println!("スキーマを適用中...");
-    db.query(SCHEMA_SQL).await?;
-
     ingest_financial_metrics(&db, input_dir).await?;
     ingest_disclosure_texts(&db, input_dir, api_key).await?;
 
@@ -90,39 +90,38 @@ async fn ingest_financial_metrics(db: &Surreal<Db>, input_dir: &PathBuf) -> Resu
                 let id = format!("{}_{}_{}", r.doc_id, r.metric, r.fiscal_year);
                 serde_json::json!({
                     "id": id,
-                    "data": {
-                        "doc_id": r.doc_id,
-                        "metric": r.metric,
-                        "xbrl_tag": r.xbrl_tag,
-                        "value": r.value,
-                        "unit": r.unit,
-                        "fiscal_year": r.fiscal_year,
-                        "consolidated": r.consolidated,
-                    }
+                    "doc_id": r.doc_id,
+                    "metric": r.metric,
+                    "xbrl_tag": r.xbrl_tag,
+                    "value": r.value,
+                    "unit": r.unit,
+                    "fiscal_year": r.fiscal_year,
+                    "consolidated": r.consolidated,
+                    "company_code": r.company_code,
                 })
             })
             .collect();
 
-        db.query("FOR $row IN $batch { UPSERT type::thing('financial_metric', $row.id) CONTENT $row.data; }")
-            .bind(("batch", batch))
-            .await?;
+        db.query(
+            "FOR $row IN $batch { \
+               UPSERT type::thing('financial_metric', $row.id) SET \
+                 doc_id = $row.doc_id, metric = $row.metric, xbrl_tag = $row.xbrl_tag, \
+                 value = $row.value, unit = $row.unit, \
+                 fiscal_year = $row.fiscal_year, consolidated = $row.consolidated, \
+                 company = IF $row.company_code != NONE \
+                            THEN type::thing('company', $row.company_code) \
+                            ELSE NONE END; \
+             }",
+        )
+        .bind(("batch", batch))
+        .await?
+        .check()?;
 
         count += chunk.len();
         print!("\r  financial_metric 投入: {} / {} 件", count, rows.len());
         std::io::stdout().flush().ok();
     }
     println!();
-
-    link_company(
-        db,
-        "financial_metric",
-        rows.iter().map(|r| {
-            let id = format!("{}_{}_{}", r.doc_id, r.metric, r.fiscal_year);
-            (id, r.company_code.clone())
-        }),
-    )
-    .await?;
-
     Ok(())
 }
 
@@ -133,7 +132,7 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
 
     // 既に投入済み（= embedding済み）の(doc_id, section)を取得し、未処理分だけに絞る。
     // これがdisclosure_textの冪等性・embedding再計算防止の要になる。
-    let mut existing_resp = db.query("SELECT doc_id, section FROM disclosure_text").await?;
+    let mut existing_resp = db.query("SELECT doc_id, section FROM disclosure_text").await?.check()?;
     let existing: Vec<ExistingKey> = existing_resp.take(0)?;
     let existing_keys: HashSet<(String, String)> = existing
         .into_iter()
@@ -166,69 +165,32 @@ async fn ingest_disclosure_texts(db: &Surreal<Db>, input_dir: &PathBuf, api_key:
                 let id = format!("{}_{}", r.doc_id, r.section);
                 serde_json::json!({
                     "id": id,
-                    "data": {
-                        "doc_id": r.doc_id,
-                        "section": r.section,
-                        "fiscal_year": r.fiscal_year,
-                        "text": r.text,
-                        "embedding": emb,
-                    }
+                    "doc_id": r.doc_id,
+                    "section": r.section,
+                    "fiscal_year": r.fiscal_year,
+                    "text": r.text,
+                    "embedding": emb,
+                    "company_code": r.company_code,
                 })
             })
             .collect();
 
-        db.query("FOR $row IN $batch { UPSERT type::thing('disclosure_text', $row.id) CONTENT $row.data; }")
-            .bind(("batch", batch))
-            .await?;
+        db.query(
+            "FOR $row IN $batch { \
+               UPSERT type::thing('disclosure_text', $row.id) SET \
+                 doc_id = $row.doc_id, section = $row.section, fiscal_year = $row.fiscal_year, \
+                 text = $row.text, embedding = $row.embedding, \
+                 company = IF $row.company_code != NONE \
+                            THEN type::thing('company', $row.company_code) \
+                            ELSE NONE END; \
+             }",
+        )
+        .bind(("batch", batch))
+        .await?
+        .check()?;
 
         embedded += chunk.len();
         print!("\r  disclosure_text embedding+投入: {} / {} 件", embedded, to_embed.len());
-        std::io::stdout().flush().ok();
-    }
-    println!();
-
-    link_company(
-        db,
-        "disclosure_text",
-        rows.iter().map(|r| {
-            let id = format!("{}_{}", r.doc_id, r.section);
-            (id, r.company_code.clone())
-        }),
-    )
-    .await?;
-
-    Ok(())
-}
-
-/// 指定テーブルの各レコードに company（companyへのレコードリンク）を設定する。
-/// レコードリンクはJSON経由のCONTENTでは作れない（実験で確認済み、2026/08/18/002.md）
-/// ため、`type::thing()`を使うクエリで別途SETする。
-///
-/// レコードIDは投入時点で決定的に分かっているため、`WHERE doc_id = ...`のような
-/// 検索ベースの更新はしない。doc_idにインデックスが無い状態でそれをやった結果、
-/// 実データに対してフルスキャンが発生し完了しないほど遅くなった実測がある
-/// （2026/08/17/003.md）。主キー直接指定ならテーブルサイズに関係なく高速。
-async fn link_company(
-    db: &Surreal<Db>,
-    table: &str,
-    rows: impl Iterator<Item = (String, Option<String>)>,
-) -> Result<()> {
-    let updates: Vec<serde_json::Value> = rows
-        .filter_map(|(id, code)| code.map(|code| serde_json::json!({ "id": id, "code": code })))
-        .collect();
-
-    println!("{table}: companyリンク設定対象 {} 件", updates.len());
-
-    let mut done = 0usize;
-    for chunk in updates.chunks(500) {
-        db.query(
-            "FOR $row IN $batch { UPDATE type::thing($table, $row.id) SET company = type::thing('company', $row.code); }",
-        )
-        .bind(("table", table.to_string()))
-        .bind(("batch", chunk.to_vec()))
-        .await?;
-        done += chunk.len();
-        print!("\r  {table} companyリンク: {} / {} 件", done, updates.len());
         std::io::stdout().flush().ok();
     }
     println!();

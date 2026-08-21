@@ -67,8 +67,16 @@ pub enum Command {
         #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
         master: PathBuf,
     },
+    /// SurrealDBへスキーマを明示的に適用する（2026/08/21/002.md）。
+    /// ingest/companies/repackはスキーマを一切適用しないため、新規DBには
+    /// 先にこれを1回実行しておく必要がある。schema.surqlを編集した時も同様。
+    InitDb {
+        #[arg(long, value_name = "FILE", default_value = "../../data/kabuto.db")]
+        db: PathBuf,
+    },
     /// parseの出力をSurrealDBへ投入する。disclosure_textは未embeddingのものだけ
     /// OpenAIでembeddingしてから投入する（既存分はスキップ、冪等）。
+    /// スキーマは適用しない（先にinit-dbを実行しておくこと）。
     /// アプリ本体（Tauri）を起動したまま実行しないこと。
     Ingest {
         #[arg(long, value_name = "DIR", default_value = "data")]
@@ -77,11 +85,24 @@ pub enum Command {
         db: PathBuf,
     },
     /// master.parquetの銘柄情報をSurrealDBのcompanyテーブルへ投入する（2026/08/18/002.md）。
+    /// スキーマは適用しない（先にinit-dbを実行しておくこと）。
     Companies {
         #[arg(long, value_name = "FILE", default_value = "data/master.parquet")]
         master: PathBuf,
         #[arg(long, value_name = "FILE", default_value = "../../data/kabuto.db")]
         db: PathBuf,
+    },
+    /// 肥大化したDBを、新しい空のDBへバッチコピーして詰め直す（2026/08/18/003.md）。
+    /// 既にコピー先にあるIDはスキップするため、--limitで打ち切っても再実行で続きから再開できる。
+    /// スキーマは適用しない（先にdstに対してinit-dbを実行しておくこと）。
+    Repack {
+        #[arg(long, value_name = "FILE")]
+        src: PathBuf,
+        #[arg(long, value_name = "FILE")]
+        dst: PathBuf,
+        /// 1回の実行で新規コピーする件数の上限（省略時は無制限）
+        #[arg(long, value_name = "N")]
+        limit: Option<usize>,
     },
     /// codelist → master → fetch を一括実行し、個別株全件の有価証券報告書を取得する。
     /// 既に取得済みの書類はスキップするため、繰り返し実行しても安全（冪等）。
